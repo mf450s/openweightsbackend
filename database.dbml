@@ -48,7 +48,7 @@ Table training_splits {
   user_id integer [ref: > users.id]
   name varchar [not null]
   description text
-  created_at timestamp
+  created_at timestamp [not null]
 }
 
 Table workout_templates {
@@ -68,6 +68,7 @@ Table template_exercises {
   order_in_template integer
   pause_seconds integer // if null, use user's default
   weight_kg decimal // saved from latest session for auto-filling, can be overridden when performing a session
+  updated_at timestamp
 }
 
 Table workout_sessions {
