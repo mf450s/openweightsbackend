@@ -15,6 +15,7 @@ Table users {
   default_pause_seconds integer
   email varchar [not null, unique]
   password_hash varchar [not null]
+  created_at timestamp [not null]
 }
 
 Table user_settings {
@@ -30,6 +31,7 @@ Table exercises {
   laterality laterality [not null, default: 'bilateral']
   created_by_user_id integer [ref: > users.id, null]
   is_public boolean [not null, default: false]
+  execution_notes text
 }
 
 Table exercise_alternatives {
@@ -64,6 +66,8 @@ Table template_exercises {
   reps integer
   rir integer
   order_in_template integer
+  pause_seconds integer // if null, use user's default
+  weight_kg decimal // saved from latest session for auto-filling, can be overridden when performing a session
 }
 
 Table workout_sessions {
@@ -73,18 +77,21 @@ Table workout_sessions {
   performed_at timestamp [not null]
   notes text
   started_at timestamp
-  duration_minutes integer
+  ended_at timestamp
 }
 
 Table session_sets {
   id integer [pk, increment]
   session_id integer [ref: > workout_sessions.id]
   exercise_id integer [ref: > exercises.id]
+  template_exercise_id integer [ref: > template_exercises.id, null]
+  session_notes text
   set_number integer [not null]
   side side [null]
   weight_kg decimal
   reps integer
-  rir decimal
+  rir integer
+  completed boolean [default: true]
 }
 
 Enum laterality {
