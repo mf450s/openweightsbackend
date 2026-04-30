@@ -1,5 +1,5 @@
 from fastapi import APIRouter, Depends, HTTPException, Response, status
-from sqlmodel import Session, and_, or_, select
+from sqlmodel import Session, and_, delete, or_, select
 
 from app.api.deps import get_current_user, get_optional_current_user
 from app.db.session import get_session
@@ -58,7 +58,7 @@ def create_muscle_group(
     _: User = Depends(get_current_user),
     session: Session = Depends(get_session),
 ) -> MuscleGroup:
-    existing = session.exec(select(MuscleGroup).where(MuscleGroup.name == payload.name)).first()
+    existing = session.exec(select(MuscleGroup.id).where(MuscleGroup.name == payload.name)).first()
     if existing:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
@@ -97,7 +97,7 @@ def create_muscle_region(
         )
 
     existing = session.exec(
-        select(MuscleRegion).where(
+        select(MuscleRegion.id).where(
             and_(
                 MuscleRegion.name == payload.name,
                 MuscleRegion.group_id == payload.group_id,
@@ -160,7 +160,7 @@ def create_exercise(
         )
 
     existing = session.exec(
-        select(Exercise).where(
+        select(Exercise.id).where(
             and_(
                 Exercise.name == payload.name,
                 Exercise.created_by_user_id == current_user.id,
@@ -195,7 +195,7 @@ def update_exercise(
     updates = payload.model_dump(exclude_unset=True)
     if "name" in updates:
         existing = session.exec(
-            select(Exercise).where(
+            select(Exercise.id).where(
                 and_(
                     Exercise.name == updates["name"],
                     Exercise.created_by_user_id == current_user.id,
@@ -216,8 +216,7 @@ def update_exercise(
                 detail="Selected muscle region does not exist.",
             )
 
-    for field_name, value in updates.items():
-        setattr(exercise, field_name, value)
+    exercise.sqlmodel_update(updates)
 
     session.add(exercise)
     session.commit()
@@ -245,16 +244,14 @@ def delete_exercise(
             detail="Exercise is used in templates or sessions and cannot be deleted.",
         )
 
-    alternatives = session.exec(
-        select(ExerciseAlternative).where(
+    session.exec(
+        delete(ExerciseAlternative).where(
             or_(
                 ExerciseAlternative.exercise_id == exercise_id,
                 ExerciseAlternative.alternative_id == exercise_id,
             )
         )
-    ).all()
-    for relation in alternatives:
-        session.delete(relation)
+    )
 
     session.delete(exercise)
     session.commit()
@@ -283,7 +280,9 @@ def list_exercise_alternatives(
     if not alternative_ids:
         return []
 
-    alternatives = session.exec(select(Exercise).where(Exercise.id.in_(alternative_ids))).all()
+    alternatives = session.exec(
+        select(Exercise).where(Exercise.id.in_(alternative_ids)).order_by(Exercise.name, Exercise.id)
+    ).all()
     return [item for item in alternatives if _can_access_exercise(item, current_user)]
 
 

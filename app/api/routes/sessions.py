@@ -1,5 +1,5 @@
 from fastapi import APIRouter, Depends, HTTPException, Response, status
-from sqlmodel import Session, select
+from sqlmodel import Session, delete, select
 
 from app.api.deps import get_current_user
 from app.db.session import get_session
@@ -147,9 +147,7 @@ def delete_session(
     session: Session = Depends(get_session),
 ) -> Response:
     workout_session = _get_session_or_404(session, session_id, current_user)
-    session_sets = session.exec(select(SessionSet).where(SessionSet.session_id == session_id)).all()
-    for session_set in session_sets:
-        session.delete(session_set)
+    session.exec(delete(SessionSet).where(SessionSet.session_id == session_id))
     session.delete(workout_session)
     session.commit()
     return Response(status_code=status.HTTP_204_NO_CONTENT)

@@ -1,7 +1,7 @@
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Response, status
-from sqlmodel import Session, select
+from sqlmodel import Session, delete, select
 
 from app.api.deps import get_current_user
 from app.core.security import hash_password, verify_password
@@ -42,16 +42,14 @@ def update_current_user(
 ) -> User:
     updates = payload.model_dump(exclude_unset=True)
     if "email" in updates and updates["email"] != current_user.email:
-        existing = session.exec(select(User).where(User.email == updates["email"])).first()
-        if existing:
+        existing = session.exec(select(User.id).where(User.email == updates["email"])).first()
+        if existing is not None:
             raise HTTPException(
                 status_code=status.HTTP_409_CONFLICT,
                 detail="A user with this email already exists.",
             )
 
-    for field_name, value in updates.items():
-        setattr(current_user, field_name, value)
-
+    current_user.sqlmodel_update(updates)
     session.add(current_user)
     session.commit()
     session.refresh(current_user)
@@ -142,38 +140,15 @@ def delete_current_user(
             detail="Password is incorrect.",
         )
 
-    workout_sessions = session.exec(
-        select(WorkoutSession).where(WorkoutSession.user_id == current_user.id)
-    ).all()
-    workout_session_ids = [item.id for item in workout_sessions if item.id is not None]
-    if workout_session_ids:
-        session_sets = session.exec(
-            select(SessionSet).where(SessionSet.session_id.in_(workout_session_ids))
-        ).all()
-        for session_set in session_sets:
-            session.delete(session_set)
-    for workout_session in workout_sessions:
-        session.delete(workout_session)
+    workout_session_ids = select(WorkoutSession.id).where(WorkoutSession.user_id == current_user.id)
+    split_ids = select(TrainingSplit.id).where(TrainingSplit.user_id == current_user.id)
+    template_ids = select(WorkoutTemplate.id).where(WorkoutTemplate.split_id.in_(split_ids))
 
-    training_splits = session.exec(
-        select(TrainingSplit).where(TrainingSplit.user_id == current_user.id)
-    ).all()
-    split_ids = [item.id for item in training_splits if item.id is not None]
-    if split_ids:
-        workout_templates = session.exec(
-            select(WorkoutTemplate).where(WorkoutTemplate.split_id.in_(split_ids))
-        ).all()
-        template_ids = [item.id for item in workout_templates if item.id is not None]
-        if template_ids:
-            template_exercises = session.exec(
-                select(TemplateExercise).where(TemplateExercise.template_id.in_(template_ids))
-            ).all()
-            for template_exercise in template_exercises:
-                session.delete(template_exercise)
-        for workout_template in workout_templates:
-            session.delete(workout_template)
-    for training_split in training_splits:
-        session.delete(training_split)
+    session.exec(delete(SessionSet).where(SessionSet.session_id.in_(workout_session_ids)))
+    session.exec(delete(WorkoutSession).where(WorkoutSession.user_id == current_user.id))
+    session.exec(delete(TemplateExercise).where(TemplateExercise.template_id.in_(template_ids)))
+    session.exec(delete(WorkoutTemplate).where(WorkoutTemplate.split_id.in_(split_ids)))
+    session.exec(delete(TrainingSplit).where(TrainingSplit.user_id == current_user.id))
 
     user_settings = session.get(UserSettings, current_user.id)
     if user_settings is not None:

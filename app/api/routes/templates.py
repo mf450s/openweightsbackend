@@ -1,7 +1,7 @@
 from datetime import timezone, datetime
 
 from fastapi import APIRouter, Depends, HTTPException, Response, status
-from sqlmodel import Session, select
+from sqlmodel import Session, delete, select
 
 from app.api.deps import get_optional_current_user
 from app.db.session import get_session
@@ -109,12 +109,7 @@ def update_template(
 def delete_template(template_id: int, session: Session = Depends(get_session)) -> Response:
     template = _get_template_or_404(session, template_id)
 
-    template_exercises = session.exec(
-        select(TemplateExercise).where(TemplateExercise.template_id == template.id)
-    ).all()
-    for item in template_exercises:
-        session.delete(item)
-
+    session.exec(delete(TemplateExercise).where(TemplateExercise.template_id == template.id))
     session.delete(template)
     session.commit()
     return Response(status_code=status.HTTP_204_NO_CONTENT)
