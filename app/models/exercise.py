@@ -1,5 +1,6 @@
 from typing import List, Optional, TYPE_CHECKING
 
+from pydantic import field_validator
 from sqlmodel import Field, Relationship, SQLModel
 
 from app.models.common import Laterality
@@ -37,6 +38,22 @@ class ExerciseBase(SQLModel):
     is_public: bool = False
     execution_notes: str | None = None
 
+    @field_validator("name")
+    @classmethod
+    def validate_name(cls, value: str) -> str:
+        normalized = value.strip()
+        if len(normalized) < 2:
+            raise ValueError("Exercise name must be at least 2 characters long.")
+        return normalized
+
+    @field_validator("execution_notes")
+    @classmethod
+    def validate_execution_notes(cls, value: str | None) -> str | None:
+        if value is None:
+            return value
+        normalized = value.strip()
+        return normalized or None
+
 
 class Exercise(ExerciseBase, table=True):
     __tablename__ = "exercises"
@@ -61,3 +78,65 @@ class ExerciseCreate(ExerciseBase):
 
 class ExerciseRead(ExerciseBase):
     id: int
+
+
+class ExerciseUpdate(SQLModel):
+    name: str | None = None
+    muscle_region_id: int | None = None
+    laterality: Laterality | None = None
+    is_public: bool | None = None
+    execution_notes: str | None = None
+
+    @field_validator("name")
+    @classmethod
+    def validate_name(cls, value: str | None) -> str | None:
+        if value is None:
+            return value
+        normalized = value.strip()
+        if len(normalized) < 2:
+            raise ValueError("Exercise name must be at least 2 characters long.")
+        return normalized
+
+    @field_validator("execution_notes")
+    @classmethod
+    def validate_execution_notes(cls, value: str | None) -> str | None:
+        if value is None:
+            return value
+        normalized = value.strip()
+        return normalized or None
+
+
+class MuscleGroupCreate(SQLModel):
+    name: str
+
+    @field_validator("name")
+    @classmethod
+    def validate_name(cls, value: str) -> str:
+        normalized = value.strip()
+        if len(normalized) < 2:
+            raise ValueError("Muscle group name must be at least 2 characters long.")
+        return normalized
+
+
+class MuscleGroupRead(SQLModel):
+    id: int
+    name: str
+
+
+class MuscleRegionCreate(SQLModel):
+    name: str
+    group_id: int | None = None
+
+    @field_validator("name")
+    @classmethod
+    def validate_name(cls, value: str) -> str:
+        normalized = value.strip()
+        if len(normalized) < 2:
+            raise ValueError("Muscle region name must be at least 2 characters long.")
+        return normalized
+
+
+class MuscleRegionRead(SQLModel):
+    id: int
+    name: str
+    group_id: int | None = None
