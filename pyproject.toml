@@ -29,5 +29,9 @@ dev = [
 addopts = "-q"
 testpaths = ["tests"]
 
+[tool.coverage.run]
+source = ["app"]
+omit = ["tests/*"]
+
 [tool.setuptools.packages.find]
 include = ["app*"]
