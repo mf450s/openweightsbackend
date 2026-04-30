@@ -84,3 +84,62 @@ def test_users_endpoints_require_authentication(client):
 
     me_response = client.get("/api/v1/users/me")
     assert me_response.status_code == 401
+
+    settings_response = client.get("/api/v1/users/me/settings")
+    assert settings_response.status_code == 401
+
+
+def test_user_settings_crud(client):
+    assert register_user(client).status_code == 201
+    token = login_user(client).json()["access_token"]
+    headers = {"Authorization": f"Bearer {token}"}
+
+    initial_response = client.get("/api/v1/users/me/settings", headers=headers)
+    assert initial_response.status_code == 200
+    assert initial_response.json()["preferences"] == {}
+
+    replace_response = client.put(
+        "/api/v1/users/me/settings",
+        json={"preferences": {"units": "metric", "theme": "light"}},
+        headers=headers,
+    )
+    assert replace_response.status_code == 200
+    assert replace_response.json()["preferences"] == {"units": "metric", "theme": "light"}
+
+    patch_response = client.patch(
+        "/api/v1/users/me/settings",
+        json={"preferences": {"theme": "dark", "rest_timer_sound": "beep"}},
+        headers=headers,
+    )
+    assert patch_response.status_code == 200
+    assert patch_response.json()["preferences"] == {
+        "units": "metric",
+        "theme": "dark",
+        "rest_timer_sound": "beep",
+    }
+
+
+def test_delete_current_user_requires_correct_password(client):
+    assert register_user(client).status_code == 201
+    token = login_user(client).json()["access_token"]
+    headers = {"Authorization": f"Bearer {token}"}
+
+    wrong_password_response = client.request(
+        "DELETE",
+        "/api/v1/users/me",
+        json={"password": "wrongpassword"},
+        headers=headers,
+    )
+    assert wrong_password_response.status_code == 400
+    assert wrong_password_response.json()["detail"] == "Password is incorrect."
+
+    delete_response = client.request(
+        "DELETE",
+        "/api/v1/users/me",
+        json={"password": "supersecret"},
+        headers=headers,
+    )
+    assert delete_response.status_code == 204
+
+    login_response = login_user(client)
+    assert login_response.status_code == 401

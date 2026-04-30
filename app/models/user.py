@@ -109,6 +109,24 @@ class UserPasswordUpdate(SQLModel):
         return value
 
 
+class UserDeleteRequest(SQLModel):
+    password: str
+
+
+class UserSettingsRead(SQLModel):
+    user_id: int
+    preferences: dict[str, Any]
+    updated_at: datetime
+
+
+class UserSettingsUpdate(SQLModel):
+    preferences: dict[str, Any]
+
+
+class UserSettingsPatch(SQLModel):
+    preferences: dict[str, Any]
+
+
 class LoginRequest(SQLModel):
     email: str
     password: str
