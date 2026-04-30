@@ -12,15 +12,26 @@ Table muscleRegions {
 Table users {
   id integer [pk, increment]
   name varchar [not null]
+  default_pause_seconds integer
 }
 
 Table exercises {
   id integer [pk, increment]
   name varchar [not null]
   muscle_region_id integer [ref: > muscleRegions.id]
+  laterality laterality [not null, default: 'bilateral']
+
 }
 
-// Gruppierung von Trainingstagen
+Table exercise_alternatives {
+  exercise_id integer [ref: > exercises.id]
+  alternative_id integer [ref: > exercises.id]
+
+  indexes {
+    (exercise_id, alternative_id) [pk]
+  }
+}
+
 Table training_splits {
   id integer [pk, increment]
   user_id integer [ref: > users.id]
@@ -29,7 +40,6 @@ Table training_splits {
   created_at timestamp
 }
 
-// Template: wie ein Trainingstag aussehen soll (kein Gewicht)
 Table workout_templates {
   id integer [pk, increment]
   split_id integer [ref: > training_splits.id]
@@ -37,7 +47,6 @@ Table workout_templates {
   order_in_split integer
 }
 
-// Welche Übungen + Sätze/Wiederholungen im Template geplant sind
 Table template_exercises {
   id integer [pk, increment]
   template_id integer [ref: > workout_templates.id]
@@ -48,22 +57,34 @@ Table template_exercises {
   order_in_template integer
 }
 
-// Tatsächlich durchgeführtes Training (Instanz eines Templates)
 Table workout_sessions {
   id integer [pk, increment]
   user_id integer [ref: > users.id]
-  template_id integer [ref: > workout_templates.id, null]  // optional: Vorlage
+  template_id integer [ref: > workout_templates.id, null]   
   performed_at timestamp [not null]
   notes text
+  started_at timestamp
+  duration_minutes integer
 }
 
-// Tatsächlich geloggte Sätze (echte Daten)
 Table session_sets {
   id integer [pk, increment]
   session_id integer [ref: > workout_sessions.id]
   exercise_id integer [ref: > exercises.id]
   set_number integer [not null]
+  side side [null]
   weight_kg decimal
   reps integer
   rir decimal
+}
+
+Enum laterality {
+  bilateral
+  unilateral
+}
+
+Enum side {
+  left
+  right
+  bilateral
 }
