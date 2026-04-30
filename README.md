@@ -37,6 +37,8 @@ uvicorn app.main:app --reload
 - `GET /api/v1/users/me`
 - `PATCH /api/v1/users/me`
 - `POST /api/v1/users/me/password`
+- `DELETE /api/v1/users/me`
+- `GET|PUT|PATCH /api/v1/users/me/settings`
 - `GET|POST /api/v1/exercises`
 - `GET|POST /api/v1/templates`
 - `GET|PATCH|DELETE /api/v1/templates/{template_id}`
