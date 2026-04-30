@@ -3,8 +3,10 @@ pyproject.toml
 app/__init__.py
 app/main.py
 app/api/__init__.py
+app/api/deps.py
 app/api/router.py
 app/api/routes/__init__.py
+app/api/routes/auth.py
 app/api/routes/exercises.py
 app/api/routes/health.py
 app/api/routes/sessions.py
@@ -12,6 +14,7 @@ app/api/routes/templates.py
 app/api/routes/users.py
 app/core/__init__.py
 app/core/config.py
+app/core/security.py
 app/db/__init__.py
 app/db/base.py
 app/db/init_db.py
@@ -22,10 +25,18 @@ app/models/exercise.py
 app/models/session.py
 app/models/template.py
 app/models/user.py
+app/services/__init__.py
+app/services/exercise_access.py
+app/services/persistence.py
+app/services/session_service.py
+app/services/user_service.py
 openweightsbackend.egg-info/PKG-INFO
 openweightsbackend.egg-info/SOURCES.txt
 openweightsbackend.egg-info/dependency_links.txt
 openweightsbackend.egg-info/requires.txt
 openweightsbackend.egg-info/top_level.txt
+tests/test_exercises.py
 tests/test_health.py
+tests/test_sessions.py
+tests/test_templates.py
 tests/test_users.py

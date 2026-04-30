@@ -14,6 +14,7 @@ Requires-Dist: uvicorn[standard]<1.0.0,>=0.30.6
 Provides-Extra: dev
 Requires-Dist: httpx<1.0.0,>=0.27.2; extra == "dev"
 Requires-Dist: pytest<9.0.0,>=8.3.2; extra == "dev"
+Requires-Dist: pytest-cov<6.0.0,>=5.0.0; extra == "dev"
 
 # openweightsbackend
 
@@ -48,13 +49,26 @@ uvicorn app.main:app --reload
 
 - `GET /`
 - `GET /api/v1/health`
-- `GET|POST /api/v1/users`
+- `POST /api/v1/auth/register`
+- `POST /api/v1/auth/login`
+- `GET /api/v1/users`
+- `GET /api/v1/users/me`
+- `PATCH /api/v1/users/me`
+- `POST /api/v1/users/me/password`
+- `DELETE /api/v1/users/me`
+- `GET|PUT|PATCH /api/v1/users/me/settings`
 - `GET|POST /api/v1/exercises`
 - `GET|POST /api/v1/templates`
+- `GET|PATCH|DELETE /api/v1/templates/{template_id}`
+- `GET|POST /api/v1/templates/{template_id}/exercises`
+- `PATCH|DELETE /api/v1/templates/{template_id}/exercises/{template_exercise_id}`
 - `GET|POST /api/v1/sessions`
+
+SwaggerUI: `http://127.0.0.1:8000/docs`
 
 ## Notes
 
 - `DATABASE_URL` defaults to SQLite for local development.
 - PostgreSQL is supported through the same `DATABASE_URL`.
 - The SQLModel schema mirrors the current structure in `database.dbml`.
+- Set `AUTH_SECRET_KEY` in production to a strong random value.
