@@ -31,7 +31,3 @@ def json_dict_field() -> Any:
 
 def weight_field() -> Any:
     return Field(default=None, sa_column=Column(Numeric(6, 2), nullable=True))
-
-
-def default_preferences() -> dict[str, Any]:
-    return {}
