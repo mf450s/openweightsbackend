@@ -47,6 +47,7 @@ def verify_password(password: str, stored_password_hash: str) -> bool:
 
 def create_access_token(user_id: int, expires_delta: timedelta | None = None) -> str:
     settings = get_settings()
+    secret_key = settings.auth_secret_key.get_secret_value()
     expiration = datetime.now(timezone.utc) + (
         expires_delta or timedelta(minutes=settings.auth_token_expire_minutes)
     )
@@ -57,7 +58,7 @@ def create_access_token(user_id: int, expires_delta: timedelta | None = None) ->
     payload_bytes = json.dumps(payload, separators=(",", ":"), sort_keys=True).encode("utf-8")
     encoded_payload = base64.urlsafe_b64encode(payload_bytes).decode("utf-8")
     signature = hmac.new(
-        settings.auth_secret_key.encode("utf-8"),
+        secret_key.encode("utf-8"),
         encoded_payload.encode("utf-8"),
         hashlib.sha256,
     ).digest()
@@ -67,6 +68,7 @@ def create_access_token(user_id: int, expires_delta: timedelta | None = None) ->
 
 def decode_access_token(token: str) -> dict[str, str | int]:
     settings = get_settings()
+    secret_key = settings.auth_secret_key.get_secret_value()
 
     try:
         encoded_payload, encoded_signature = token.split(".", maxsplit=1)
@@ -74,7 +76,7 @@ def decode_access_token(token: str) -> dict[str, str | int]:
         raise ValueError("Invalid token format.") from exc
 
     expected_signature = hmac.new(
-        settings.auth_secret_key.encode("utf-8"),
+        secret_key.encode("utf-8"),
         encoded_payload.encode("utf-8"),
         hashlib.sha256,
     ).digest()
@@ -88,7 +90,14 @@ def decode_access_token(token: str) -> dict[str, str | int]:
     if not hmac.compare_digest(expected_signature, actual_signature):
         raise ValueError("Invalid token signature.")
 
-    expires_at = int(payload["exp"])
+    subject = payload.get("sub")
+    if not isinstance(subject, str) or not subject:
+        raise ValueError("Invalid token subject.")
+
+    expires_at = payload.get("exp")
+    if not isinstance(expires_at, int):
+        raise ValueError("Invalid token expiration.")
+
     if datetime.now(timezone.utc).timestamp() > expires_at:
         raise ValueError("Token has expired.")
 
