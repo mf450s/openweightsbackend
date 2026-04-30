@@ -1,6 +1,7 @@
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Response, status
+from sqlalchemy import update
 from sqlmodel import Session, delete, select
 
 from app.api.deps import get_current_user
@@ -154,12 +155,11 @@ def delete_current_user(
     if user_settings is not None:
         session.delete(user_settings)
 
-    created_exercises = session.exec(
-        select(Exercise).where(Exercise.created_by_user_id == current_user.id)
-    ).all()
-    for exercise in created_exercises:
-        exercise.created_by_user_id = None
-        session.add(exercise)
+    session.exec(
+        update(Exercise)
+        .where(Exercise.created_by_user_id == current_user.id)
+        .values(created_by_user_id=None)
+    )
 
     session.delete(current_user)
     session.commit()
