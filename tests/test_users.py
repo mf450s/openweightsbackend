@@ -143,3 +143,32 @@ def test_delete_current_user_requires_correct_password(client):
 
     login_response = login_user(client)
     assert login_response.status_code == 401
+
+
+def test_profile_update_rejects_duplicate_email(client):
+    assert register_user(client, email="first@example.com", name="First").status_code == 201
+    assert register_user(client, email="second@example.com", name="Second").status_code == 201
+
+    token = login_user(client, email="first@example.com", password="supersecret").json()["access_token"]
+    headers = {"Authorization": f"Bearer {token}"}
+
+    response = client.patch(
+        "/api/v1/users/me",
+        json={"email": "second@example.com"},
+        headers=headers,
+    )
+    assert response.status_code == 409
+
+
+def test_password_change_requires_correct_current_password(client):
+    assert register_user(client).status_code == 201
+    token = login_user(client).json()["access_token"]
+    headers = {"Authorization": f"Bearer {token}"}
+
+    response = client.post(
+        "/api/v1/users/me/password",
+        json={"current_password": "definitely-wrong", "new_password": "anothersecret"},
+        headers=headers,
+    )
+    assert response.status_code == 400
+    assert response.json()["detail"] == "Current password is incorrect."
