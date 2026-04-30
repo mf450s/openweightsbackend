@@ -1,0 +1,63 @@
+from typing import List, Optional, TYPE_CHECKING
+
+from sqlmodel import Field, Relationship, SQLModel
+
+from app.models.common import Laterality
+
+if TYPE_CHECKING:
+    from app.models.session import SessionSet
+    from app.models.template import TemplateExercise
+
+
+class MuscleGroup(SQLModel, table=True):
+    __tablename__ = "muscleGroups"
+
+    id: int | None = Field(default=None, primary_key=True)
+    name: str
+
+    regions: List["MuscleRegion"] = Relationship(back_populates="group")
+
+
+class MuscleRegion(SQLModel, table=True):
+    __tablename__ = "muscleRegions"
+
+    id: int | None = Field(default=None, primary_key=True)
+    name: str
+    group_id: int | None = Field(default=None, foreign_key="muscleGroups.id")
+
+    group: Optional["MuscleGroup"] = Relationship(back_populates="regions")
+    exercises: List["Exercise"] = Relationship(back_populates="muscle_region")
+
+
+class ExerciseBase(SQLModel):
+    name: str = Field(index=True)
+    muscle_region_id: int | None = Field(default=None, foreign_key="muscleRegions.id")
+    laterality: Laterality = Field(default=Laterality.bilateral)
+    created_by_user_id: int | None = Field(default=None, foreign_key="users.id")
+    is_public: bool = False
+    execution_notes: str | None = None
+
+
+class Exercise(ExerciseBase, table=True):
+    __tablename__ = "exercises"
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+
+    muscle_region: Optional["MuscleRegion"] = Relationship(back_populates="exercises")
+    template_exercises: List["TemplateExercise"] = Relationship(back_populates="exercise")
+    session_sets: List["SessionSet"] = Relationship(back_populates="exercise")
+
+
+class ExerciseAlternative(SQLModel, table=True):
+    __tablename__ = "exercise_alternatives"
+
+    exercise_id: int = Field(foreign_key="exercises.id", primary_key=True)
+    alternative_id: int = Field(foreign_key="exercises.id", primary_key=True)
+
+
+class ExerciseCreate(ExerciseBase):
+    pass
+
+
+class ExerciseRead(ExerciseBase):
+    id: int

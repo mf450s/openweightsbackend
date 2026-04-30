@@ -1,3 +1,20 @@
+Metadata-Version: 2.4
+Name: openweightsbackend
+Version: 0.1.0
+Summary: Self-hosted backend for workouts
+Requires-Python: >=3.11
+Description-Content-Type: text/markdown
+Requires-Dist: alembic<2.0.0,>=1.13.2
+Requires-Dist: fastapi<1.0.0,>=0.115.0
+Requires-Dist: psycopg[binary]<4.0.0,>=3.2.1
+Requires-Dist: pydantic-settings<3.0.0,>=2.4.0
+Requires-Dist: python-dotenv<2.0.0,>=1.0.1
+Requires-Dist: sqlmodel<0.1.0,>=0.0.22
+Requires-Dist: uvicorn[standard]<1.0.0,>=0.30.6
+Provides-Extra: dev
+Requires-Dist: httpx<1.0.0,>=0.27.2; extra == "dev"
+Requires-Dist: pytest<9.0.0,>=8.3.2; extra == "dev"
+
 # openweightsbackend
 
 selfhosted backend for workouts
@@ -35,8 +52,6 @@ uvicorn app.main:app --reload
 - `GET|POST /api/v1/exercises`
 - `GET|POST /api/v1/templates`
 - `GET|POST /api/v1/sessions`
-
-SwaggerUI: `http://127.0.0.1:8000/docs`
 
 ## Notes
 
