@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException, Response, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 from sqlmodel import Session, delete, select
 
 from app.api.deps import get_current_user
@@ -16,6 +16,8 @@ from app.models.session import (
 from app.models.template import TemplateExercise, WorkoutTemplate
 from app.models.user import User
 from app.services.exercise_access import ensure_accessible_exercise_or_400
+from app.services.persistence import no_content_response, save_and_refresh
+from app.services.session_service import delete_workout_session_with_sets
 
 router = APIRouter()
 
@@ -78,12 +80,16 @@ def _resolve_template_exercise_for_session_set(
 @router.get("/", response_model=list[WorkoutSessionRead])
 def list_sessions(
     current_user: User = Depends(get_current_user),
+    limit: int = Query(default=100, ge=1, le=500),
+    offset: int = Query(default=0, ge=0),
     session: Session = Depends(get_session),
 ) -> list[WorkoutSession]:
     statement = (
         select(WorkoutSession)
         .where(WorkoutSession.user_id == current_user.id)
         .order_by(WorkoutSession.performed_at.desc(), WorkoutSession.id.desc())
+        .offset(offset)
+        .limit(limit)
     )
     return list(session.exec(statement).all())
 
@@ -106,10 +112,7 @@ def create_session(
     _validate_template_for_session(session, payload.template_id)
     workout_session = WorkoutSession.model_validate(payload)
     workout_session.user_id = current_user.id
-    session.add(workout_session)
-    session.commit()
-    session.refresh(workout_session)
-    return workout_session
+    return save_and_refresh(session, workout_session)
 
 
 @router.patch("/{session_id}", response_model=WorkoutSessionRead)
@@ -124,10 +127,7 @@ def update_session(
     if "template_id" in updates:
         _validate_template_for_session(session, updates["template_id"])
     workout_session.sqlmodel_update(updates)
-    session.add(workout_session)
-    session.commit()
-    session.refresh(workout_session)
-    return workout_session
+    return save_and_refresh(session, workout_session)
 
 
 @router.delete("/{session_id}", status_code=status.HTTP_204_NO_CONTENT)
@@ -137,16 +137,17 @@ def delete_session(
     session: Session = Depends(get_session),
 ) -> Response:
     workout_session = _get_session_or_404(session, session_id, current_user)
-    session.exec(delete(SessionSet).where(SessionSet.session_id == session_id))
-    session.delete(workout_session)
+    delete_workout_session_with_sets(session, workout_session)
     session.commit()
-    return Response(status_code=status.HTTP_204_NO_CONTENT)
+    return no_content_response()
 
 
 @router.get("/{session_id}/sets", response_model=list[SessionSetRead])
 def list_session_sets(
     session_id: int,
     current_user: User = Depends(get_current_user),
+    limit: int = Query(default=200, ge=1, le=1000),
+    offset: int = Query(default=0, ge=0),
     session: Session = Depends(get_session),
 ) -> list[SessionSet]:
     _get_session_or_404(session, session_id, current_user)
@@ -154,6 +155,8 @@ def list_session_sets(
         select(SessionSet)
         .where(SessionSet.session_id == session_id)
         .order_by(SessionSet.set_number, SessionSet.id)
+        .offset(offset)
+        .limit(limit)
     )
     return list(session.exec(statement).all())
 
@@ -185,10 +188,7 @@ def create_session_set(
     session_set.session_id = session_id
     if session_set.exercise_id is None and exercise_id is not None:
         session_set.exercise_id = exercise_id
-    session.add(session_set)
-    session.commit()
-    session.refresh(session_set)
-    return session_set
+    return save_and_refresh(session, session_set)
 
 
 @router.patch("/{session_id}/sets/{set_id}", response_model=SessionSetRead)
@@ -220,10 +220,7 @@ def update_session_set(
     _validate_exercise_for_session_set(session, exercise_id, current_user.id)
 
     session_set.sqlmodel_update(updates)
-    session.add(session_set)
-    session.commit()
-    session.refresh(session_set)
-    return session_set
+    return save_and_refresh(session, session_set)
 
 
 @router.delete("/{session_id}/sets/{set_id}", status_code=status.HTTP_204_NO_CONTENT)
@@ -237,4 +234,4 @@ def delete_session_set(
     session_set = _get_session_set_or_404(session, session_id, set_id)
     session.delete(session_set)
     session.commit()
-    return Response(status_code=status.HTTP_204_NO_CONTENT)
+    return no_content_response()

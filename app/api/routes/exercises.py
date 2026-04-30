@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException, Response, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 from sqlmodel import Session, and_, delete, or_, select
 
 from app.api.deps import get_current_user, get_optional_current_user
@@ -20,6 +20,7 @@ from app.models.session import SessionSet
 from app.models.template import TemplateExercise
 from app.models.user import User
 from app.services.exercise_access import can_access_exercise, get_accessible_exercise_or_404
+from app.services.persistence import no_content_response, save_and_refresh
 
 router = APIRouter()
 
@@ -29,8 +30,12 @@ def _can_modify_exercise(exercise: Exercise, user: User) -> bool:
 
 
 @router.get("/muscle-groups/", response_model=list[MuscleGroupRead])
-def list_muscle_groups(session: Session = Depends(get_session)) -> list[MuscleGroup]:
-    statement = select(MuscleGroup).order_by(MuscleGroup.name)
+def list_muscle_groups(
+    limit: int = Query(default=200, ge=1, le=1000),
+    offset: int = Query(default=0, ge=0),
+    session: Session = Depends(get_session),
+) -> list[MuscleGroup]:
+    statement = select(MuscleGroup).order_by(MuscleGroup.name).offset(offset).limit(limit)
     return list(session.exec(statement).all())
 
 
@@ -48,21 +53,20 @@ def create_muscle_group(
         )
 
     group = MuscleGroup(name=payload.name)
-    session.add(group)
-    session.commit()
-    session.refresh(group)
-    return group
+    return save_and_refresh(session, group)
 
 
 @router.get("/muscle-regions/", response_model=list[MuscleRegionRead])
 def list_muscle_regions(
     group_id: int | None = None,
+    limit: int = Query(default=500, ge=1, le=2000),
+    offset: int = Query(default=0, ge=0),
     session: Session = Depends(get_session),
 ) -> list[MuscleRegion]:
     statement = select(MuscleRegion)
     if group_id is not None:
         statement = statement.where(MuscleRegion.group_id == group_id)
-    statement = statement.order_by(MuscleRegion.name)
+    statement = statement.order_by(MuscleRegion.name).offset(offset).limit(limit)
     return list(session.exec(statement).all())
 
 
@@ -93,19 +97,20 @@ def create_muscle_region(
         )
 
     region = MuscleRegion(name=payload.name, group_id=payload.group_id)
-    session.add(region)
-    session.commit()
-    session.refresh(region)
-    return region
+    return save_and_refresh(session, region)
 
 
 @router.get("/", response_model=list[ExerciseRead])
 def list_exercises(
     current_user: User | None = Depends(get_optional_current_user),
+    limit: int = Query(default=200, ge=1, le=1000),
+    offset: int = Query(default=0, ge=0),
     session: Session = Depends(get_session),
 ) -> list[Exercise]:
     if current_user is None:
-        statement = select(Exercise).where(Exercise.is_public.is_(True)).order_by(Exercise.name)
+        statement = (
+            select(Exercise).where(Exercise.is_public.is_(True)).order_by(Exercise.name).offset(offset).limit(limit)
+        )
     else:
         statement = (
             select(Exercise)
@@ -116,6 +121,8 @@ def list_exercises(
                 )
             )
             .order_by(Exercise.name)
+            .offset(offset)
+            .limit(limit)
         )
     return list(session.exec(statement).all())
 
@@ -161,10 +168,7 @@ def create_exercise(
 
     exercise = Exercise.model_validate(payload)
     exercise.created_by_user_id = current_user.id
-    session.add(exercise)
-    session.commit()
-    session.refresh(exercise)
-    return exercise
+    return save_and_refresh(session, exercise)
 
 
 @router.patch("/{exercise_id}", response_model=ExerciseRead)
@@ -203,11 +207,7 @@ def update_exercise(
             )
 
     exercise.sqlmodel_update(updates)
-
-    session.add(exercise)
-    session.commit()
-    session.refresh(exercise)
-    return exercise
+    return save_and_refresh(session, exercise)
 
 
 @router.delete("/{exercise_id}", status_code=status.HTTP_204_NO_CONTENT)
@@ -241,7 +241,7 @@ def delete_exercise(
 
     session.delete(exercise)
     session.commit()
-    return Response(status_code=status.HTTP_204_NO_CONTENT)
+    return no_content_response()
 
 
 @router.get("/{exercise_id}/alternatives", response_model=list[ExerciseRead])
@@ -308,7 +308,7 @@ def add_exercise_alternative(
         session.add(ExerciseAlternative(exercise_id=left_id, alternative_id=right_id))
         session.commit()
 
-    return Response(status_code=status.HTTP_204_NO_CONTENT)
+    return no_content_response()
 
 
 @router.delete("/{exercise_id}/alternatives/{alternative_id}", status_code=status.HTTP_204_NO_CONTENT)
@@ -336,4 +336,4 @@ def remove_exercise_alternative(
         session.delete(relation)
         session.commit()
 
-    return Response(status_code=status.HTTP_204_NO_CONTENT)
+    return no_content_response()
