@@ -169,3 +169,127 @@ def test_sessions_require_auth_and_validate_references(client):
         headers=headers,
     )
     assert invalid_exercise.status_code == 400
+
+
+def test_session_set_template_exercise_validation_paths(client):
+    assert register_user(client, email="owner@example.com", name="Owner").status_code == 201
+    headers = auth_headers(client, email="owner@example.com")
+
+    exercise = create_exercise(client, headers, name="Row", is_public=True)
+    assert exercise.status_code == 201
+    exercise_id = exercise.json()["id"]
+
+    template_a = client.post("/api/v1/templates/", json={"name": "Template A"})
+    template_b = client.post("/api/v1/templates/", json={"name": "Template B"})
+    assert template_a.status_code == 201
+    assert template_b.status_code == 201
+    template_a_id = template_a.json()["id"]
+    template_b_id = template_b.json()["id"]
+
+    template_exercise_a = client.post(
+        f"/api/v1/templates/{template_a_id}/exercises",
+        json={"exercise_id": exercise_id, "sets": 3, "reps": 10},
+        headers=headers,
+    )
+    template_exercise_b = client.post(
+        f"/api/v1/templates/{template_b_id}/exercises",
+        json={"exercise_id": exercise_id, "sets": 4, "reps": 8},
+        headers=headers,
+    )
+    assert template_exercise_a.status_code == 201
+    assert template_exercise_b.status_code == 201
+
+    session_a = client.post(
+        "/api/v1/sessions/",
+        json={"performed_at": "2026-01-01T09:00:00Z", "template_id": template_a_id},
+        headers=headers,
+    )
+    assert session_a.status_code == 201
+    session_id = session_a.json()["id"]
+
+    invalid_template_exercise = client.post(
+        f"/api/v1/sessions/{session_id}/sets",
+        json={"template_exercise_id": 99999, "set_number": 1},
+        headers=headers,
+    )
+    assert invalid_template_exercise.status_code == 400
+
+    wrong_template_link = client.post(
+        f"/api/v1/sessions/{session_id}/sets",
+        json={"template_exercise_id": template_exercise_b.json()['id'], "set_number": 1},
+        headers=headers,
+    )
+    assert wrong_template_link.status_code == 400
+
+    valid_set = client.post(
+        f"/api/v1/sessions/{session_id}/sets",
+        json={"template_exercise_id": template_exercise_a.json()['id'], "set_number": 1, "reps": 10},
+        headers=headers,
+    )
+    assert valid_set.status_code == 201
+    set_id = valid_set.json()["id"]
+
+    wrong_template_link_update = client.patch(
+        f"/api/v1/sessions/{session_id}/sets/{set_id}",
+        json={"template_exercise_id": template_exercise_b.json()['id']},
+        headers=headers,
+    )
+    assert wrong_template_link_update.status_code == 400
+
+
+def test_update_session_and_set_not_found_paths(client):
+    assert register_user(client, email="owner@example.com", name="Owner").status_code == 201
+    headers = auth_headers(client, email="owner@example.com")
+
+    create_session_response = client.post(
+        "/api/v1/sessions/",
+        json={"performed_at": "2026-01-01T09:00:00Z"},
+        headers=headers,
+    )
+    assert create_session_response.status_code == 201
+    session_id = create_session_response.json()["id"]
+
+    invalid_template_update = client.patch(
+        f"/api/v1/sessions/{session_id}",
+        json={"template_id": 99999},
+        headers=headers,
+    )
+    assert invalid_template_update.status_code == 400
+
+    set_response = client.post(
+        f"/api/v1/sessions/{session_id}/sets",
+        json={"set_number": 1, "reps": 8, "exercise_id": 999},
+        headers=headers,
+    )
+    assert set_response.status_code == 400
+
+    exercise = create_exercise(client, headers, name="Leg Press", is_public=True)
+    assert exercise.status_code == 201
+    exercise_id = exercise.json()["id"]
+    valid_set = client.post(
+        f"/api/v1/sessions/{session_id}/sets",
+        json={"set_number": 1, "reps": 8, "exercise_id": exercise_id},
+        headers=headers,
+    )
+    assert valid_set.status_code == 201
+    set_id = valid_set.json()["id"]
+
+    wrong_session_patch = client.patch(
+        f"/api/v1/sessions/99999/sets/{set_id}",
+        json={"reps": 9},
+        headers=headers,
+    )
+    assert wrong_session_patch.status_code == 404
+
+    wrong_set_patch = client.patch(
+        f"/api/v1/sessions/{session_id}/sets/99999",
+        json={"reps": 9},
+        headers=headers,
+    )
+    assert wrong_set_patch.status_code == 404
+
+    wrong_set_delete = client.delete(
+        f"/api/v1/sessions/{session_id}/sets/99999",
+        headers=headers,
+    )
+    assert wrong_set_delete.status_code == 404

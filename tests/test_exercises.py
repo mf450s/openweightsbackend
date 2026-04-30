@@ -166,3 +166,155 @@ def test_exercise_endpoints_require_auth_where_needed(client):
         headers=headers,
     )
     assert invalid_alternative.status_code == 400
+
+
+def test_muscle_group_and_region_conflict_and_validation(client):
+    assert register_user(client, email="owner@example.com", name="Owner").status_code == 201
+    headers = auth_headers(client, email="owner@example.com")
+
+    first_group = client.post(
+        "/api/v1/exercises/muscle-groups/",
+        json={"name": "Back"},
+        headers=headers,
+    )
+    assert first_group.status_code == 201
+
+    duplicate_group = client.post(
+        "/api/v1/exercises/muscle-groups/",
+        json={"name": "Back"},
+        headers=headers,
+    )
+    assert duplicate_group.status_code == 409
+
+    invalid_region = client.post(
+        "/api/v1/exercises/muscle-regions/",
+        json={"name": "Lats", "group_id": 99999},
+        headers=headers,
+    )
+    assert invalid_region.status_code == 400
+
+    created_group_id = first_group.json()["id"]
+    first_region = client.post(
+        "/api/v1/exercises/muscle-regions/",
+        json={"name": "Lats", "group_id": created_group_id},
+        headers=headers,
+    )
+    assert first_region.status_code == 201
+
+    duplicate_region = client.post(
+        "/api/v1/exercises/muscle-regions/",
+        json={"name": "Lats", "group_id": created_group_id},
+        headers=headers,
+    )
+    assert duplicate_region.status_code == 409
+
+
+def test_exercise_create_update_conflicts_and_invalid_references(client):
+    assert register_user(client, email="owner@example.com", name="Owner").status_code == 201
+    headers = auth_headers(client, email="owner@example.com")
+
+    invalid_region_create = create_exercise(
+        client,
+        headers,
+        name="Invalid Region Exercise",
+        muscle_region_id=99999,
+    )
+    assert invalid_region_create.status_code == 400
+
+    first = create_exercise(client, headers, name="Overhead Press")
+    second = create_exercise(client, headers, name="Arnold Press")
+    assert first.status_code == 201
+    assert second.status_code == 201
+    second_id = second.json()["id"]
+
+    duplicate_name_update = client.patch(
+        f"/api/v1/exercises/{second_id}",
+        json={"name": "Overhead Press"},
+        headers=headers,
+    )
+    assert duplicate_name_update.status_code == 409
+
+    invalid_region_update = client.patch(
+        f"/api/v1/exercises/{second_id}",
+        json={"muscle_region_id": 99999},
+        headers=headers,
+    )
+    assert invalid_region_update.status_code == 400
+
+
+def test_delete_exercise_blocked_when_used_in_templates_or_sessions(client):
+    assert register_user(client, email="owner@example.com", name="Owner").status_code == 201
+    headers = auth_headers(client, email="owner@example.com")
+
+    exercise_response = create_exercise(client, headers, name="Romanian Deadlift", is_public=True)
+    assert exercise_response.status_code == 201
+    exercise_id = exercise_response.json()["id"]
+
+    template_response = client.post("/api/v1/templates/", json={"name": "Pull Day"})
+    assert template_response.status_code == 201
+    template_id = template_response.json()["id"]
+
+    template_exercise_response = client.post(
+        f"/api/v1/templates/{template_id}/exercises",
+        json={"exercise_id": exercise_id, "sets": 3, "reps": 10},
+        headers=headers,
+    )
+    assert template_exercise_response.status_code == 201
+
+    blocked_by_template = client.delete(f"/api/v1/exercises/{exercise_id}", headers=headers)
+    assert blocked_by_template.status_code == 409
+
+    remove_template_link = client.delete(
+        f"/api/v1/templates/{template_id}/exercises/{template_exercise_response.json()['id']}"
+    )
+    assert remove_template_link.status_code == 204
+
+    session_response = client.post(
+        "/api/v1/sessions/",
+        json={"performed_at": "2026-01-01T09:00:00Z"},
+        headers=headers,
+    )
+    assert session_response.status_code == 201
+    session_id = session_response.json()["id"]
+
+    set_response = client.post(
+        f"/api/v1/sessions/{session_id}/sets",
+        json={"exercise_id": exercise_id, "set_number": 1, "reps": 8},
+        headers=headers,
+    )
+    assert set_response.status_code == 201
+
+    blocked_by_session = client.delete(f"/api/v1/exercises/{exercise_id}", headers=headers)
+    assert blocked_by_session.status_code == 409
+
+
+def test_alternative_permissions_for_non_owner(client):
+    assert register_user(client, email="owner@example.com", name="Owner").status_code == 201
+    assert register_user(client, email="other@example.com", name="Other").status_code == 201
+    owner_headers = auth_headers(client, email="owner@example.com")
+    other_headers = auth_headers(client, email="other@example.com")
+
+    first = create_exercise(client, owner_headers, name="Dip", is_public=True)
+    second = create_exercise(client, owner_headers, name="Close Grip Bench", is_public=True)
+    assert first.status_code == 201
+    assert second.status_code == 201
+    first_id = first.json()["id"]
+    second_id = second.json()["id"]
+
+    add_by_other = client.post(
+        f"/api/v1/exercises/{first_id}/alternatives/{second_id}",
+        headers=other_headers,
+    )
+    assert add_by_other.status_code == 403
+
+    add_by_owner = client.post(
+        f"/api/v1/exercises/{first_id}/alternatives/{second_id}",
+        headers=owner_headers,
+    )
+    assert add_by_owner.status_code == 204
+
+    remove_by_other = client.delete(
+        f"/api/v1/exercises/{first_id}/alternatives/{second_id}",
+        headers=other_headers,
+    )
+    assert remove_by_other.status_code == 403
