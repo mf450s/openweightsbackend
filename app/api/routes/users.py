@@ -1,5 +1,3 @@
-from datetime import datetime, timezone
-
 from fastapi import APIRouter, Depends, HTTPException, Response, status
 from sqlalchemy import update
 from sqlmodel import Session, delete, select
@@ -7,6 +5,7 @@ from sqlmodel import Session, delete, select
 from app.api.deps import get_current_user
 from app.core.security import hash_password, verify_password
 from app.db.session import get_session
+from app.models.common import utcnow
 from app.models.exercise import Exercise
 from app.models.session import SessionSet, WorkoutSession
 from app.models.template import TemplateExercise, TrainingSplit, WorkoutTemplate
@@ -81,7 +80,7 @@ def _get_or_create_user_settings(session: Session, user_id: int) -> UserSettings
         settings = UserSettings(
             user_id=user_id,
             preferences={},
-            updated_at=datetime.now(timezone.utc),
+            updated_at=utcnow(),
         )
         session.add(settings)
         session.commit()
@@ -105,7 +104,7 @@ def replace_current_user_settings(
 ) -> UserSettings:
     settings = _get_or_create_user_settings(session, current_user.id)
     settings.preferences = payload.preferences
-    settings.updated_at = datetime.now(timezone.utc)
+    settings.updated_at = utcnow()
     session.add(settings)
     session.commit()
     session.refresh(settings)
@@ -122,7 +121,7 @@ def patch_current_user_settings(
     merged_preferences = dict(settings.preferences)
     merged_preferences.update(payload.preferences)
     settings.preferences = merged_preferences
-    settings.updated_at = datetime.now(timezone.utc)
+    settings.updated_at = utcnow()
     session.add(settings)
     session.commit()
     session.refresh(settings)
