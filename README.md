@@ -1,5 +1,7 @@
 # openweightsbackend
 
+selfhosted backend for workouts
+
 current db scheme needs to be updated in `database.dbml`.
 planned stack:
 
