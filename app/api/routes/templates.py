@@ -1,11 +1,9 @@
-from datetime import timezone, datetime
-
-from fastapi import APIRouter, Depends, HTTPException, Response, status
-from sqlmodel import Session, select
+from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
+from sqlmodel import Session, delete, select
 
 from app.api.deps import get_optional_current_user
 from app.db.session import get_session
-from app.models.exercise import Exercise
+from app.models.common import utcnow
 from app.models.template import (
     TemplateExercise,
     TemplateExerciseCreate,
@@ -17,6 +15,8 @@ from app.models.template import (
     WorkoutTemplateUpdate,
 )
 from app.models.user import User
+from app.services.exercise_access import ensure_accessible_exercise_or_400
+from app.services.persistence import no_content_response, save_and_refresh
 
 router = APIRouter()
 
@@ -40,36 +40,13 @@ def _get_template_exercise_or_404(
     return template_exercise
 
 
-def _get_accessible_exercise_or_400(
-    session: Session, exercise_id: int | None, current_user: User | None
-) -> Exercise:
-    if exercise_id is None:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="exercise_id is required.",
-        )
-
-    exercise = session.get(Exercise, exercise_id)
-    if exercise is None:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Selected exercise does not exist.",
-        )
-
-    if exercise.is_public:
-        return exercise
-    if current_user is not None and exercise.created_by_user_id == current_user.id:
-        return exercise
-
-    raise HTTPException(
-        status_code=status.HTTP_400_BAD_REQUEST,
-        detail="Selected exercise is not accessible.",
-    )
-
-
 @router.get("/", response_model=list[WorkoutTemplateRead])
-def list_templates(session: Session = Depends(get_session)) -> list[WorkoutTemplate]:
-    statement = select(WorkoutTemplate).order_by(WorkoutTemplate.id)
+def list_templates(
+    limit: int = Query(default=100, ge=1, le=500),
+    offset: int = Query(default=0, ge=0),
+    session: Session = Depends(get_session),
+) -> list[WorkoutTemplate]:
+    statement = select(WorkoutTemplate).order_by(WorkoutTemplate.id).offset(offset).limit(limit)
     return list(session.exec(statement).all())
 
 
@@ -83,10 +60,7 @@ def create_template(
     payload: WorkoutTemplateCreate, session: Session = Depends(get_session)
 ) -> WorkoutTemplate:
     template = WorkoutTemplate.model_validate(payload)
-    session.add(template)
-    session.commit()
-    session.refresh(template)
-    return template
+    return save_and_refresh(session, template)
 
 
 @router.patch("/{template_id}", response_model=WorkoutTemplateRead)
@@ -98,31 +72,24 @@ def update_template(
     template = _get_template_or_404(session, template_id)
     updates = payload.model_dump(exclude_unset=True)
     template.sqlmodel_update(updates)
-
-    session.add(template)
-    session.commit()
-    session.refresh(template)
-    return template
+    return save_and_refresh(session, template)
 
 
 @router.delete("/{template_id}", status_code=status.HTTP_204_NO_CONTENT)
 def delete_template(template_id: int, session: Session = Depends(get_session)) -> Response:
     template = _get_template_or_404(session, template_id)
 
-    template_exercises = session.exec(
-        select(TemplateExercise).where(TemplateExercise.template_id == template.id)
-    ).all()
-    for item in template_exercises:
-        session.delete(item)
-
+    session.exec(delete(TemplateExercise).where(TemplateExercise.template_id == template.id))
     session.delete(template)
     session.commit()
-    return Response(status_code=status.HTTP_204_NO_CONTENT)
+    return no_content_response()
 
 
 @router.get("/{template_id}/exercises", response_model=list[TemplateExerciseRead])
 def list_template_exercises(
     template_id: int,
+    limit: int = Query(default=200, ge=1, le=1000),
+    offset: int = Query(default=0, ge=0),
     session: Session = Depends(get_session),
 ) -> list[TemplateExercise]:
     _get_template_or_404(session, template_id)
@@ -130,6 +97,8 @@ def list_template_exercises(
         select(TemplateExercise)
         .where(TemplateExercise.template_id == template_id)
         .order_by(TemplateExercise.order_in_template, TemplateExercise.id)
+        .offset(offset)
+        .limit(limit)
     )
     return list(session.exec(statement).all())
 
@@ -146,15 +115,16 @@ def add_template_exercise(
     session: Session = Depends(get_session),
 ) -> TemplateExercise:
     _get_template_or_404(session, template_id)
-    _get_accessible_exercise_or_400(session, payload.exercise_id, current_user)
+    ensure_accessible_exercise_or_400(
+        session=session,
+        exercise_id=payload.exercise_id,
+        user_id=current_user.id if current_user is not None else None,
+    )
 
     template_exercise = TemplateExercise.model_validate(payload)
     template_exercise.template_id = template_id
-    template_exercise.updated_at = datetime.now(timezone.utc)
-    session.add(template_exercise)
-    session.commit()
-    session.refresh(template_exercise)
-    return template_exercise
+    template_exercise.updated_at = utcnow()
+    return save_and_refresh(session, template_exercise)
 
 
 @router.patch("/{template_id}/exercises/{template_exercise_id}", response_model=TemplateExerciseRead)
@@ -169,15 +139,16 @@ def update_template_exercise(
     updates = payload.model_dump(exclude_unset=True)
 
     if "exercise_id" in updates:
-        _get_accessible_exercise_or_400(session, updates["exercise_id"], current_user)
+        ensure_accessible_exercise_or_400(
+            session=session,
+            exercise_id=updates["exercise_id"],
+            user_id=current_user.id if current_user is not None else None,
+        )
 
     template_exercise.sqlmodel_update(updates)
 
-    template_exercise.updated_at = datetime.now(timezone.utc)
-    session.add(template_exercise)
-    session.commit()
-    session.refresh(template_exercise)
-    return template_exercise
+    template_exercise.updated_at = utcnow()
+    return save_and_refresh(session, template_exercise)
 
 
 @router.delete("/{template_id}/exercises/{template_exercise_id}", status_code=status.HTTP_204_NO_CONTENT)
@@ -189,4 +160,4 @@ def delete_template_exercise(
     template_exercise = _get_template_exercise_or_404(session, template_id, template_exercise_id)
     session.delete(template_exercise)
     session.commit()
-    return Response(status_code=status.HTTP_204_NO_CONTENT)
+    return no_content_response()

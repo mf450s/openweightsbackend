@@ -4,14 +4,15 @@ from sqlmodel import Session, select
 from app.core.security import create_access_token, hash_password, verify_password
 from app.db.session import get_session
 from app.models.user import AuthToken, LoginRequest, User, UserCreate, UserRead
+from app.services.persistence import save_and_refresh
 
 router = APIRouter()
 
 
 @router.post("/register", response_model=UserRead, status_code=status.HTTP_201_CREATED)
 def register_user(payload: UserCreate, session: Session = Depends(get_session)) -> User:
-    existing = session.exec(select(User).where(User.email == payload.email)).first()
-    if existing:
+    existing = session.exec(select(User.id).where(User.email == payload.email)).first()
+    if existing is not None:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
             detail="A user with this email already exists.",
@@ -23,10 +24,7 @@ def register_user(payload: UserCreate, session: Session = Depends(get_session)) 
         default_pause_seconds=payload.default_pause_seconds,
         password_hash=hash_password(payload.password),
     )
-    session.add(user)
-    session.commit()
-    session.refresh(user)
-    return user
+    return save_and_refresh(session, user)
 
 
 @router.post("/login", response_model=AuthToken)

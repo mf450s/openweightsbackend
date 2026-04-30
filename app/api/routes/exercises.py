@@ -1,5 +1,5 @@
-from fastapi import APIRouter, Depends, HTTPException, Response, status
-from sqlmodel import Session, and_, or_, select
+from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
+from sqlmodel import Session, and_, delete, or_, select
 
 from app.api.deps import get_current_user, get_optional_current_user
 from app.db.session import get_session
@@ -19,36 +19,23 @@ from app.models.exercise import (
 from app.models.session import SessionSet
 from app.models.template import TemplateExercise
 from app.models.user import User
+from app.services.exercise_access import can_access_exercise, get_accessible_exercise_or_404
+from app.services.persistence import no_content_response, save_and_refresh
 
 router = APIRouter()
-
-
-def _can_access_exercise(exercise: Exercise, user: User | None) -> bool:
-    if exercise.is_public:
-        return True
-    if user is None:
-        return False
-    return exercise.created_by_user_id == user.id
 
 
 def _can_modify_exercise(exercise: Exercise, user: User) -> bool:
     return exercise.created_by_user_id == user.id
 
 
-def _get_accessible_exercise_or_404(
-    session: Session,
-    exercise_id: int,
-    user: User | None,
-) -> Exercise:
-    exercise = session.get(Exercise, exercise_id)
-    if exercise is None or not _can_access_exercise(exercise, user):
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Exercise not found.")
-    return exercise
-
-
 @router.get("/muscle-groups/", response_model=list[MuscleGroupRead])
-def list_muscle_groups(session: Session = Depends(get_session)) -> list[MuscleGroup]:
-    statement = select(MuscleGroup).order_by(MuscleGroup.name)
+def list_muscle_groups(
+    limit: int = Query(default=200, ge=1, le=1000),
+    offset: int = Query(default=0, ge=0),
+    session: Session = Depends(get_session),
+) -> list[MuscleGroup]:
+    statement = select(MuscleGroup).order_by(MuscleGroup.name).offset(offset).limit(limit)
     return list(session.exec(statement).all())
 
 
@@ -58,7 +45,7 @@ def create_muscle_group(
     _: User = Depends(get_current_user),
     session: Session = Depends(get_session),
 ) -> MuscleGroup:
-    existing = session.exec(select(MuscleGroup).where(MuscleGroup.name == payload.name)).first()
+    existing = session.exec(select(MuscleGroup.id).where(MuscleGroup.name == payload.name)).first()
     if existing:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
@@ -66,21 +53,20 @@ def create_muscle_group(
         )
 
     group = MuscleGroup(name=payload.name)
-    session.add(group)
-    session.commit()
-    session.refresh(group)
-    return group
+    return save_and_refresh(session, group)
 
 
 @router.get("/muscle-regions/", response_model=list[MuscleRegionRead])
 def list_muscle_regions(
     group_id: int | None = None,
+    limit: int = Query(default=500, ge=1, le=2000),
+    offset: int = Query(default=0, ge=0),
     session: Session = Depends(get_session),
 ) -> list[MuscleRegion]:
     statement = select(MuscleRegion)
     if group_id is not None:
         statement = statement.where(MuscleRegion.group_id == group_id)
-    statement = statement.order_by(MuscleRegion.name)
+    statement = statement.order_by(MuscleRegion.name).offset(offset).limit(limit)
     return list(session.exec(statement).all())
 
 
@@ -97,7 +83,7 @@ def create_muscle_region(
         )
 
     existing = session.exec(
-        select(MuscleRegion).where(
+        select(MuscleRegion.id).where(
             and_(
                 MuscleRegion.name == payload.name,
                 MuscleRegion.group_id == payload.group_id,
@@ -111,19 +97,20 @@ def create_muscle_region(
         )
 
     region = MuscleRegion(name=payload.name, group_id=payload.group_id)
-    session.add(region)
-    session.commit()
-    session.refresh(region)
-    return region
+    return save_and_refresh(session, region)
 
 
 @router.get("/", response_model=list[ExerciseRead])
 def list_exercises(
     current_user: User | None = Depends(get_optional_current_user),
+    limit: int = Query(default=200, ge=1, le=1000),
+    offset: int = Query(default=0, ge=0),
     session: Session = Depends(get_session),
 ) -> list[Exercise]:
     if current_user is None:
-        statement = select(Exercise).where(Exercise.is_public.is_(True)).order_by(Exercise.name)
+        statement = (
+            select(Exercise).where(Exercise.is_public.is_(True)).order_by(Exercise.name).offset(offset).limit(limit)
+        )
     else:
         statement = (
             select(Exercise)
@@ -134,6 +121,8 @@ def list_exercises(
                 )
             )
             .order_by(Exercise.name)
+            .offset(offset)
+            .limit(limit)
         )
     return list(session.exec(statement).all())
 
@@ -144,7 +133,11 @@ def read_exercise(
     current_user: User | None = Depends(get_optional_current_user),
     session: Session = Depends(get_session),
 ) -> Exercise:
-    return _get_accessible_exercise_or_404(session, exercise_id, current_user)
+    return get_accessible_exercise_or_404(
+        session=session,
+        exercise_id=exercise_id,
+        user_id=current_user.id if current_user is not None else None,
+    )
 
 
 @router.post("/", response_model=ExerciseRead, status_code=status.HTTP_201_CREATED)
@@ -160,7 +153,7 @@ def create_exercise(
         )
 
     existing = session.exec(
-        select(Exercise).where(
+        select(Exercise.id).where(
             and_(
                 Exercise.name == payload.name,
                 Exercise.created_by_user_id == current_user.id,
@@ -175,10 +168,7 @@ def create_exercise(
 
     exercise = Exercise.model_validate(payload)
     exercise.created_by_user_id = current_user.id
-    session.add(exercise)
-    session.commit()
-    session.refresh(exercise)
-    return exercise
+    return save_and_refresh(session, exercise)
 
 
 @router.patch("/{exercise_id}", response_model=ExerciseRead)
@@ -188,14 +178,14 @@ def update_exercise(
     current_user: User = Depends(get_current_user),
     session: Session = Depends(get_session),
 ) -> Exercise:
-    exercise = _get_accessible_exercise_or_404(session, exercise_id, current_user)
+    exercise = get_accessible_exercise_or_404(session, exercise_id, current_user.id)
     if not _can_modify_exercise(exercise, current_user):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not enough permissions.")
 
     updates = payload.model_dump(exclude_unset=True)
     if "name" in updates:
         existing = session.exec(
-            select(Exercise).where(
+            select(Exercise.id).where(
                 and_(
                     Exercise.name == updates["name"],
                     Exercise.created_by_user_id == current_user.id,
@@ -216,13 +206,8 @@ def update_exercise(
                 detail="Selected muscle region does not exist.",
             )
 
-    for field_name, value in updates.items():
-        setattr(exercise, field_name, value)
-
-    session.add(exercise)
-    session.commit()
-    session.refresh(exercise)
-    return exercise
+    exercise.sqlmodel_update(updates)
+    return save_and_refresh(session, exercise)
 
 
 @router.delete("/{exercise_id}", status_code=status.HTTP_204_NO_CONTENT)
@@ -231,7 +216,7 @@ def delete_exercise(
     current_user: User = Depends(get_current_user),
     session: Session = Depends(get_session),
 ) -> Response:
-    exercise = _get_accessible_exercise_or_404(session, exercise_id, current_user)
+    exercise = get_accessible_exercise_or_404(session, exercise_id, current_user.id)
     if not _can_modify_exercise(exercise, current_user):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not enough permissions.")
 
@@ -245,20 +230,18 @@ def delete_exercise(
             detail="Exercise is used in templates or sessions and cannot be deleted.",
         )
 
-    alternatives = session.exec(
-        select(ExerciseAlternative).where(
+    session.exec(
+        delete(ExerciseAlternative).where(
             or_(
                 ExerciseAlternative.exercise_id == exercise_id,
                 ExerciseAlternative.alternative_id == exercise_id,
             )
         )
-    ).all()
-    for relation in alternatives:
-        session.delete(relation)
+    )
 
     session.delete(exercise)
     session.commit()
-    return Response(status_code=status.HTTP_204_NO_CONTENT)
+    return no_content_response()
 
 
 @router.get("/{exercise_id}/alternatives", response_model=list[ExerciseRead])
@@ -267,7 +250,11 @@ def list_exercise_alternatives(
     current_user: User | None = Depends(get_optional_current_user),
     session: Session = Depends(get_session),
 ) -> list[Exercise]:
-    exercise = _get_accessible_exercise_or_404(session, exercise_id, current_user)
+    exercise = get_accessible_exercise_or_404(
+        session=session,
+        exercise_id=exercise_id,
+        user_id=current_user.id if current_user is not None else None,
+    )
     relation_rows = session.exec(
         select(ExerciseAlternative).where(
             or_(
@@ -283,8 +270,11 @@ def list_exercise_alternatives(
     if not alternative_ids:
         return []
 
-    alternatives = session.exec(select(Exercise).where(Exercise.id.in_(alternative_ids))).all()
-    return [item for item in alternatives if _can_access_exercise(item, current_user)]
+    alternatives = session.exec(
+        select(Exercise).where(Exercise.id.in_(alternative_ids)).order_by(Exercise.name, Exercise.id)
+    ).all()
+    current_user_id = current_user.id if current_user is not None else None
+    return [item for item in alternatives if can_access_exercise(item, current_user_id)]
 
 
 @router.post("/{exercise_id}/alternatives/{alternative_id}", status_code=status.HTTP_204_NO_CONTENT)
@@ -300,8 +290,8 @@ def add_exercise_alternative(
             detail="An exercise cannot be an alternative to itself.",
         )
 
-    exercise = _get_accessible_exercise_or_404(session, exercise_id, current_user)
-    alternative = _get_accessible_exercise_or_404(session, alternative_id, current_user)
+    exercise = get_accessible_exercise_or_404(session, exercise_id, current_user.id)
+    alternative = get_accessible_exercise_or_404(session, alternative_id, current_user.id)
     if not _can_modify_exercise(exercise, current_user):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not enough permissions.")
 
@@ -318,7 +308,7 @@ def add_exercise_alternative(
         session.add(ExerciseAlternative(exercise_id=left_id, alternative_id=right_id))
         session.commit()
 
-    return Response(status_code=status.HTTP_204_NO_CONTENT)
+    return no_content_response()
 
 
 @router.delete("/{exercise_id}/alternatives/{alternative_id}", status_code=status.HTTP_204_NO_CONTENT)
@@ -328,8 +318,8 @@ def remove_exercise_alternative(
     current_user: User = Depends(get_current_user),
     session: Session = Depends(get_session),
 ) -> Response:
-    exercise = _get_accessible_exercise_or_404(session, exercise_id, current_user)
-    _get_accessible_exercise_or_404(session, alternative_id, current_user)
+    exercise = get_accessible_exercise_or_404(session, exercise_id, current_user.id)
+    get_accessible_exercise_or_404(session, alternative_id, current_user.id)
     if not _can_modify_exercise(exercise, current_user):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not enough permissions.")
 
@@ -346,4 +336,4 @@ def remove_exercise_alternative(
         session.delete(relation)
         session.commit()
 
-    return Response(status_code=status.HTTP_204_NO_CONTENT)
+    return no_content_response()
