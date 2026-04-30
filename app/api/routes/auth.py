@@ -10,8 +10,8 @@ router = APIRouter()
 
 @router.post("/register", response_model=UserRead, status_code=status.HTTP_201_CREATED)
 def register_user(payload: UserCreate, session: Session = Depends(get_session)) -> User:
-    existing = session.exec(select(User).where(User.email == payload.email)).first()
-    if existing:
+    existing = session.exec(select(User.id).where(User.email == payload.email)).first()
+    if existing is not None:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
             detail="A user with this email already exists.",
