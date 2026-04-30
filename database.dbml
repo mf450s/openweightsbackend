@@ -1,0 +1,69 @@
+Table muscleGroups {
+  id integer [pk, increment]
+  name varchar [not null]
+}
+
+Table muscleRegions {
+  id integer [pk, increment]
+  name varchar [not null]
+  group_id integer [ref: > muscleGroups.id]
+}
+
+Table users {
+  id integer [pk, increment]
+  name varchar [not null]
+}
+
+Table exercises {
+  id integer [pk, increment]
+  name varchar [not null]
+  muscle_region_id integer [ref: > muscleRegions.id]
+}
+
+// Gruppierung von Trainingstagen
+Table training_splits {
+  id integer [pk, increment]
+  user_id integer [ref: > users.id]
+  name varchar [not null]
+  description text
+  created_at timestamp
+}
+
+// Template: wie ein Trainingstag aussehen soll (kein Gewicht)
+Table workout_templates {
+  id integer [pk, increment]
+  split_id integer [ref: > training_splits.id]
+  name varchar [not null]
+  order_in_split integer
+}
+
+// Welche Übungen + Sätze/Wiederholungen im Template geplant sind
+Table template_exercises {
+  id integer [pk, increment]
+  template_id integer [ref: > workout_templates.id]
+  exercise_id integer [ref: > exercises.id]
+  sets integer
+  reps integer
+  rir integer
+  order_in_template integer
+}
+
+// Tatsächlich durchgeführtes Training (Instanz eines Templates)
+Table workout_sessions {
+  id integer [pk, increment]
+  user_id integer [ref: > users.id]
+  template_id integer [ref: > workout_templates.id, null]  // optional: Vorlage
+  performed_at timestamp [not null]
+  notes text
+}
+
+// Tatsächlich geloggte Sätze (echte Daten)
+Table session_sets {
+  id integer [pk, increment]
+  session_id integer [ref: > workout_sessions.id]
+  exercise_id integer [ref: > exercises.id]
+  set_number integer [not null]
+  weight_kg decimal
+  reps integer
+  rir decimal
+}
