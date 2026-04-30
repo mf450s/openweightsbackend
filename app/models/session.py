@@ -28,9 +28,9 @@ def _normalize_session_notes(value: str | None) -> str | None:
 
 
 class WorkoutSessionBase(SQLModel):
-    user_id: int | None = Field(default=None, foreign_key="users.id")
-    template_id: int | None = Field(default=None, foreign_key="workout_templates.id")
-    performed_at: datetime
+    user_id: int | None = Field(default=None, foreign_key="users.id", index=True)
+    template_id: int | None = Field(default=None, foreign_key="workout_templates.id", index=True)
+    performed_at: datetime = Field(index=True)
     notes: str | None = None
     started_at: datetime | None = None
     ended_at: datetime | None = None
@@ -55,9 +55,11 @@ class SessionSet(SQLModel, table=True):
     __tablename__ = "session_sets"
 
     id: Optional[int] = Field(default=None, primary_key=True)
-    session_id: int | None = Field(default=None, foreign_key="workout_sessions.id")
-    exercise_id: int | None = Field(default=None, foreign_key="exercises.id")
-    template_exercise_id: int | None = Field(default=None, foreign_key="template_exercises.id")
+    session_id: int | None = Field(default=None, foreign_key="workout_sessions.id", index=True)
+    exercise_id: int | None = Field(default=None, foreign_key="exercises.id", index=True)
+    template_exercise_id: int | None = Field(
+        default=None, foreign_key="template_exercises.id", index=True
+    )
     session_notes: str | None = None
     set_number: int
     side: Side | None = None

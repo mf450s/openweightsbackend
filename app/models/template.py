@@ -20,7 +20,7 @@ def _normalize_template_name(value: str) -> str:
 
 
 class TrainingSplitBase(SQLModel):
-    user_id: int | None = Field(default=None, foreign_key="users.id")
+    user_id: int | None = Field(default=None, foreign_key="users.id", index=True)
     name: str
     description: str | None = None
 
@@ -35,7 +35,7 @@ class TrainingSplit(TrainingSplitBase, TimestampedModel, table=True):
 
 
 class WorkoutTemplateBase(SQLModel):
-    split_id: int | None = Field(default=None, foreign_key="training_splits.id")
+    split_id: int | None = Field(default=None, foreign_key="training_splits.id", index=True)
     name: str
     order_in_split: int | None = None
 
@@ -56,7 +56,7 @@ class WorkoutTemplate(WorkoutTemplateBase, table=True):
 
 
 class TemplateExerciseBase(SQLModel):
-    exercise_id: int | None = Field(default=None, foreign_key="exercises.id")
+    exercise_id: int | None = Field(default=None, foreign_key="exercises.id", index=True)
     sets: int | None = None
     reps: int | None = None
     rir: int | None = None
@@ -69,7 +69,7 @@ class TemplateExercise(TemplateExerciseBase, table=True):
     __tablename__ = "template_exercises"
 
     id: int | None = Field(default=None, primary_key=True)
-    template_id: int | None = Field(default=None, foreign_key="workout_templates.id")
+    template_id: int | None = Field(default=None, foreign_key="workout_templates.id", index=True)
     updated_at: datetime | None = None
 
     template: "WorkoutTemplate" = Relationship(back_populates="template_exercises")

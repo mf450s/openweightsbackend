@@ -14,7 +14,7 @@ class MuscleGroup(SQLModel, table=True):
     __tablename__ = "muscleGroups"
 
     id: int | None = Field(default=None, primary_key=True)
-    name: str
+    name: str = Field(index=True)
 
     regions: List["MuscleRegion"] = Relationship(back_populates="group")
 
@@ -23,8 +23,8 @@ class MuscleRegion(SQLModel, table=True):
     __tablename__ = "muscleRegions"
 
     id: int | None = Field(default=None, primary_key=True)
-    name: str
-    group_id: int | None = Field(default=None, foreign_key="muscleGroups.id")
+    name: str = Field(index=True)
+    group_id: int | None = Field(default=None, foreign_key="muscleGroups.id", index=True)
 
     group: Optional["MuscleGroup"] = Relationship(back_populates="regions")
     exercises: List["Exercise"] = Relationship(back_populates="muscle_region")
@@ -32,10 +32,10 @@ class MuscleRegion(SQLModel, table=True):
 
 class ExerciseBase(SQLModel):
     name: str = Field(index=True)
-    muscle_region_id: int | None = Field(default=None, foreign_key="muscleRegions.id")
+    muscle_region_id: int | None = Field(default=None, foreign_key="muscleRegions.id", index=True)
     laterality: Laterality = Field(default=Laterality.bilateral)
-    created_by_user_id: int | None = Field(default=None, foreign_key="users.id")
-    is_public: bool = False
+    created_by_user_id: int | None = Field(default=None, foreign_key="users.id", index=True)
+    is_public: bool = Field(default=False, index=True)
     execution_notes: str | None = None
 
     @field_validator("name")
