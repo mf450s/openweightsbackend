@@ -1,11 +1,9 @@
-from datetime import timezone, datetime
-
 from fastapi import APIRouter, Depends, HTTPException, Response, status
 from sqlmodel import Session, delete, select
 
 from app.api.deps import get_optional_current_user
 from app.db.session import get_session
-from app.models.exercise import Exercise
+from app.models.common import utcnow
 from app.models.template import (
     TemplateExercise,
     TemplateExerciseCreate,
@@ -17,6 +15,7 @@ from app.models.template import (
     WorkoutTemplateUpdate,
 )
 from app.models.user import User
+from app.services.exercise_access import ensure_accessible_exercise_or_400
 
 router = APIRouter()
 
@@ -38,33 +37,6 @@ def _get_template_exercise_or_404(
             detail="Template exercise not found.",
         )
     return template_exercise
-
-
-def _get_accessible_exercise_or_400(
-    session: Session, exercise_id: int | None, current_user: User | None
-) -> Exercise:
-    if exercise_id is None:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="exercise_id is required.",
-        )
-
-    exercise = session.get(Exercise, exercise_id)
-    if exercise is None:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Selected exercise does not exist.",
-        )
-
-    if exercise.is_public:
-        return exercise
-    if current_user is not None and exercise.created_by_user_id == current_user.id:
-        return exercise
-
-    raise HTTPException(
-        status_code=status.HTTP_400_BAD_REQUEST,
-        detail="Selected exercise is not accessible.",
-    )
 
 
 @router.get("/", response_model=list[WorkoutTemplateRead])
@@ -141,11 +113,15 @@ def add_template_exercise(
     session: Session = Depends(get_session),
 ) -> TemplateExercise:
     _get_template_or_404(session, template_id)
-    _get_accessible_exercise_or_400(session, payload.exercise_id, current_user)
+    ensure_accessible_exercise_or_400(
+        session=session,
+        exercise_id=payload.exercise_id,
+        user_id=current_user.id if current_user is not None else None,
+    )
 
     template_exercise = TemplateExercise.model_validate(payload)
     template_exercise.template_id = template_id
-    template_exercise.updated_at = datetime.now(timezone.utc)
+    template_exercise.updated_at = utcnow()
     session.add(template_exercise)
     session.commit()
     session.refresh(template_exercise)
@@ -164,11 +140,15 @@ def update_template_exercise(
     updates = payload.model_dump(exclude_unset=True)
 
     if "exercise_id" in updates:
-        _get_accessible_exercise_or_400(session, updates["exercise_id"], current_user)
+        ensure_accessible_exercise_or_400(
+            session=session,
+            exercise_id=updates["exercise_id"],
+            user_id=current_user.id if current_user is not None else None,
+        )
 
     template_exercise.sqlmodel_update(updates)
 
-    template_exercise.updated_at = datetime.now(timezone.utc)
+    template_exercise.updated_at = utcnow()
     session.add(template_exercise)
     session.commit()
     session.refresh(template_exercise)
