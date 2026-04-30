@@ -19,31 +19,13 @@ from app.models.exercise import (
 from app.models.session import SessionSet
 from app.models.template import TemplateExercise
 from app.models.user import User
+from app.services.exercise_access import can_access_exercise, get_accessible_exercise_or_404
 
 router = APIRouter()
 
 
-def _can_access_exercise(exercise: Exercise, user: User | None) -> bool:
-    if exercise.is_public:
-        return True
-    if user is None:
-        return False
-    return exercise.created_by_user_id == user.id
-
-
 def _can_modify_exercise(exercise: Exercise, user: User) -> bool:
     return exercise.created_by_user_id == user.id
-
-
-def _get_accessible_exercise_or_404(
-    session: Session,
-    exercise_id: int,
-    user: User | None,
-) -> Exercise:
-    exercise = session.get(Exercise, exercise_id)
-    if exercise is None or not _can_access_exercise(exercise, user):
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Exercise not found.")
-    return exercise
 
 
 @router.get("/muscle-groups/", response_model=list[MuscleGroupRead])
@@ -144,7 +126,11 @@ def read_exercise(
     current_user: User | None = Depends(get_optional_current_user),
     session: Session = Depends(get_session),
 ) -> Exercise:
-    return _get_accessible_exercise_or_404(session, exercise_id, current_user)
+    return get_accessible_exercise_or_404(
+        session=session,
+        exercise_id=exercise_id,
+        user_id=current_user.id if current_user is not None else None,
+    )
 
 
 @router.post("/", response_model=ExerciseRead, status_code=status.HTTP_201_CREATED)
@@ -188,7 +174,7 @@ def update_exercise(
     current_user: User = Depends(get_current_user),
     session: Session = Depends(get_session),
 ) -> Exercise:
-    exercise = _get_accessible_exercise_or_404(session, exercise_id, current_user)
+    exercise = get_accessible_exercise_or_404(session, exercise_id, current_user.id)
     if not _can_modify_exercise(exercise, current_user):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not enough permissions.")
 
@@ -230,7 +216,7 @@ def delete_exercise(
     current_user: User = Depends(get_current_user),
     session: Session = Depends(get_session),
 ) -> Response:
-    exercise = _get_accessible_exercise_or_404(session, exercise_id, current_user)
+    exercise = get_accessible_exercise_or_404(session, exercise_id, current_user.id)
     if not _can_modify_exercise(exercise, current_user):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not enough permissions.")
 
@@ -264,7 +250,11 @@ def list_exercise_alternatives(
     current_user: User | None = Depends(get_optional_current_user),
     session: Session = Depends(get_session),
 ) -> list[Exercise]:
-    exercise = _get_accessible_exercise_or_404(session, exercise_id, current_user)
+    exercise = get_accessible_exercise_or_404(
+        session=session,
+        exercise_id=exercise_id,
+        user_id=current_user.id if current_user is not None else None,
+    )
     relation_rows = session.exec(
         select(ExerciseAlternative).where(
             or_(
@@ -283,7 +273,8 @@ def list_exercise_alternatives(
     alternatives = session.exec(
         select(Exercise).where(Exercise.id.in_(alternative_ids)).order_by(Exercise.name, Exercise.id)
     ).all()
-    return [item for item in alternatives if _can_access_exercise(item, current_user)]
+    current_user_id = current_user.id if current_user is not None else None
+    return [item for item in alternatives if can_access_exercise(item, current_user_id)]
 
 
 @router.post("/{exercise_id}/alternatives/{alternative_id}", status_code=status.HTTP_204_NO_CONTENT)
@@ -299,8 +290,8 @@ def add_exercise_alternative(
             detail="An exercise cannot be an alternative to itself.",
         )
 
-    exercise = _get_accessible_exercise_or_404(session, exercise_id, current_user)
-    alternative = _get_accessible_exercise_or_404(session, alternative_id, current_user)
+    exercise = get_accessible_exercise_or_404(session, exercise_id, current_user.id)
+    alternative = get_accessible_exercise_or_404(session, alternative_id, current_user.id)
     if not _can_modify_exercise(exercise, current_user):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not enough permissions.")
 
@@ -327,8 +318,8 @@ def remove_exercise_alternative(
     current_user: User = Depends(get_current_user),
     session: Session = Depends(get_session),
 ) -> Response:
-    exercise = _get_accessible_exercise_or_404(session, exercise_id, current_user)
-    _get_accessible_exercise_or_404(session, alternative_id, current_user)
+    exercise = get_accessible_exercise_or_404(session, exercise_id, current_user.id)
+    get_accessible_exercise_or_404(session, alternative_id, current_user.id)
     if not _can_modify_exercise(exercise, current_user):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not enough permissions.")
 

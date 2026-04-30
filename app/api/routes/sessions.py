@@ -3,7 +3,6 @@ from sqlmodel import Session, delete, select
 
 from app.api.deps import get_current_user
 from app.db.session import get_session
-from app.models.exercise import Exercise
 from app.models.session import (
     SessionSet,
     SessionSetCreate,
@@ -16,6 +15,7 @@ from app.models.session import (
 )
 from app.models.template import TemplateExercise, WorkoutTemplate
 from app.models.user import User
+from app.services.exercise_access import ensure_accessible_exercise_or_400
 
 router = APIRouter()
 
@@ -51,17 +51,7 @@ def _validate_exercise_for_session_set(
 ) -> None:
     if exercise_id is None:
         return
-    exercise = session.get(Exercise, exercise_id)
-    if exercise is None:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Selected exercise does not exist.",
-        )
-    if not exercise.is_public and exercise.created_by_user_id != user_id:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Selected exercise is not accessible.",
-        )
+    ensure_accessible_exercise_or_400(session=session, exercise_id=exercise_id, user_id=user_id)
 
 
 def _resolve_template_exercise_for_session_set(
