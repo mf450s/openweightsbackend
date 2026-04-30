@@ -13,6 +13,14 @@ Table users {
   id integer [pk, increment]
   name varchar [not null]
   default_pause_seconds integer
+  email varchar [not null, unique]
+  password_hash varchar [not null]
+}
+
+Table user_settings {
+  user_id integer [pk, ref: > users.id]
+  preferences jsonb [not null, default: '{}']
+  updated_at timestamp [not null]
 }
 
 Table exercises {
@@ -20,7 +28,8 @@ Table exercises {
   name varchar [not null]
   muscle_region_id integer [ref: > muscleRegions.id]
   laterality laterality [not null, default: 'bilateral']
-
+  created_by_user_id integer [ref: > users.id, null]
+  is_public boolean [not null, default: false]
 }
 
 Table exercise_alternatives {
