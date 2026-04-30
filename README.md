@@ -39,6 +39,9 @@ uvicorn app.main:app --reload
 - `POST /api/v1/users/me/password`
 - `GET|POST /api/v1/exercises`
 - `GET|POST /api/v1/templates`
+- `GET|PATCH|DELETE /api/v1/templates/{template_id}`
+- `GET|POST /api/v1/templates/{template_id}/exercises`
+- `PATCH|DELETE /api/v1/templates/{template_id}/exercises/{template_exercise_id}`
 - `GET|POST /api/v1/sessions`
 
 SwaggerUI: `http://127.0.0.1:8000/docs`

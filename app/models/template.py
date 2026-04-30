@@ -1,6 +1,7 @@
 from datetime import datetime
-from typing import TYPE_CHECKING, List, Optional
+from typing import TYPE_CHECKING
 
+from pydantic import field_validator
 from sqlmodel import Field, Relationship, SQLModel
 
 from app.models.common import TimestampedModel, weight_field
@@ -9,6 +10,13 @@ if TYPE_CHECKING:
     from app.models.exercise import Exercise
     from app.models.session import SessionSet, WorkoutSession
     from app.models.user import User
+
+
+def _normalize_template_name(value: str) -> str:
+    normalized = value.strip()
+    if len(normalized) < 2:
+        raise ValueError("Template name must be at least 2 characters long.")
+    return normalized
 
 
 class TrainingSplitBase(SQLModel):
@@ -20,10 +28,10 @@ class TrainingSplitBase(SQLModel):
 class TrainingSplit(TrainingSplitBase, TimestampedModel, table=True):
     __tablename__ = "training_splits"
 
-    id: Optional[int] = Field(default=None, primary_key=True)
+    id: int | None = Field(default=None, primary_key=True)
 
-    user: Optional["User"] = Relationship(back_populates="training_splits")
-    workout_templates: List["WorkoutTemplate"] = Relationship(back_populates="split")
+    user: "User" = Relationship(back_populates="training_splits")
+    workout_templates: list["WorkoutTemplate"] = Relationship(back_populates="split")
 
 
 class WorkoutTemplateBase(SQLModel):
@@ -31,22 +39,23 @@ class WorkoutTemplateBase(SQLModel):
     name: str
     order_in_split: int | None = None
 
+    @field_validator("name")
+    @classmethod
+    def validate_name(cls, value: str) -> str:
+        return _normalize_template_name(value)
+
 
 class WorkoutTemplate(WorkoutTemplateBase, table=True):
     __tablename__ = "workout_templates"
 
-    id: Optional[int] = Field(default=None, primary_key=True)
+    id: int | None = Field(default=None, primary_key=True)
 
-    split: Optional["TrainingSplit"] = Relationship(back_populates="workout_templates")
-    template_exercises: List["TemplateExercise"] = Relationship(back_populates="template")
-    workout_sessions: List["WorkoutSession"] = Relationship(back_populates="template")
+    split: "TrainingSplit" = Relationship(back_populates="workout_templates")
+    template_exercises: list["TemplateExercise"] = Relationship(back_populates="template")
+    workout_sessions: list["WorkoutSession"] = Relationship(back_populates="template")
 
 
-class TemplateExercise(SQLModel, table=True):
-    __tablename__ = "template_exercises"
-
-    id: Optional[int] = Field(default=None, primary_key=True)
-    template_id: int | None = Field(default=None, foreign_key="workout_templates.id")
+class TemplateExerciseBase(SQLModel):
     exercise_id: int | None = Field(default=None, foreign_key="exercises.id")
     sets: int | None = None
     reps: int | None = None
@@ -54,11 +63,18 @@ class TemplateExercise(SQLModel, table=True):
     order_in_template: int | None = None
     pause_seconds: int | None = None
     weight_kg: float | None = weight_field()
+
+
+class TemplateExercise(TemplateExerciseBase, table=True):
+    __tablename__ = "template_exercises"
+
+    id: int | None = Field(default=None, primary_key=True)
+    template_id: int | None = Field(default=None, foreign_key="workout_templates.id")
     updated_at: datetime | None = None
 
-    template: Optional["WorkoutTemplate"] = Relationship(back_populates="template_exercises")
-    exercise: Optional["Exercise"] = Relationship(back_populates="template_exercises")
-    session_sets: List["SessionSet"] = Relationship(back_populates="template_exercise")
+    template: "WorkoutTemplate" = Relationship(back_populates="template_exercises")
+    exercise: "Exercise" = Relationship(back_populates="template_exercises")
+    session_sets: list["SessionSet"] = Relationship(back_populates="template_exercise")
 
 
 class WorkoutTemplateCreate(WorkoutTemplateBase):
@@ -67,3 +83,36 @@ class WorkoutTemplateCreate(WorkoutTemplateBase):
 
 class WorkoutTemplateRead(WorkoutTemplateBase):
     id: int
+
+
+class WorkoutTemplateUpdate(SQLModel):
+    split_id: int | None = None
+    name: str | None = None
+    order_in_split: int | None = None
+
+    @field_validator("name")
+    @classmethod
+    def validate_name(cls, value: str | None) -> str | None:
+        if value is None:
+            return value
+        return _normalize_template_name(value)
+
+
+class TemplateExerciseCreate(TemplateExerciseBase):
+    pass
+
+
+class TemplateExerciseRead(TemplateExerciseBase):
+    id: int
+    template_id: int | None = None
+    updated_at: datetime | None = None
+
+
+class TemplateExerciseUpdate(SQLModel):
+    exercise_id: int | None = None
+    sets: int | None = None
+    reps: int | None = None
+    rir: int | None = None
+    order_in_template: int | None = None
+    pause_seconds: int | None = None
+    weight_kg: float | None = None
