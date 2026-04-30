@@ -31,7 +31,12 @@ uvicorn app.main:app --reload
 
 - `GET /`
 - `GET /api/v1/health`
-- `GET|POST /api/v1/users`
+- `POST /api/v1/auth/register`
+- `POST /api/v1/auth/login`
+- `GET /api/v1/users`
+- `GET /api/v1/users/me`
+- `PATCH /api/v1/users/me`
+- `POST /api/v1/users/me/password`
 - `GET|POST /api/v1/exercises`
 - `GET|POST /api/v1/templates`
 - `GET|POST /api/v1/sessions`
@@ -43,3 +48,4 @@ SwaggerUI: `http://127.0.0.1:8000/docs`
 - `DATABASE_URL` defaults to SQLite for local development.
 - PostgreSQL is supported through the same `DATABASE_URL`.
 - The SQLModel schema mirrors the current structure in `database.dbml`.
+- Set `AUTH_SECRET_KEY` in production to a strong random value.
