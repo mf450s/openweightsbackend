@@ -35,7 +35,7 @@ jobs:
           images: ghcr.io/${{ github.repository }}
           tags: |
             type=raw,value=latest,enable=${{ github.ref_name == 'main' }}
-            type=raw,value=nightly,enable=${{ github.ref_name == 'dev' }}
+            type=raw,value=nightly,enable=${{ github.ref_name == 'development' }}
 
       - name: Set up Docker layer cache
         uses: actions/cache@v4
