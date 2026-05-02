@@ -1,6 +1,7 @@
-from typing import List, Optional, TYPE_CHECKING
+from typing import Any, List, Optional, TYPE_CHECKING
 
 from pydantic import field_validator
+from sqlalchemy import UniqueConstraint
 from sqlmodel import Field, Relationship, SQLModel
 
 from app.models.common import Laterality
@@ -28,6 +29,10 @@ class MuscleRegion(SQLModel, table=True):
 
     group: Optional["MuscleGroup"] = Relationship(back_populates="regions")
     exercises: List["Exercise"] = Relationship(back_populates="muscle_region")
+
+    __table_args__: tuple = (
+        UniqueConstraint("name", "group_id", name="uq_muscle_region_name_per_group"),
+    )
 
 
 class ExerciseBase(SQLModel):
@@ -64,12 +69,16 @@ class Exercise(ExerciseBase, table=True):
     template_exercises: List["TemplateExercise"] = Relationship(back_populates="exercise")
     session_sets: List["SessionSet"] = Relationship(back_populates="exercise")
 
+    __table_args__: tuple = (
+        UniqueConstraint("name", "created_by_user_id", name="uq_exercise_name_per_user"),
+    )
+
 
 class ExerciseAlternative(SQLModel, table=True):
     __tablename__ = "exercise_alternatives"
 
     exercise_id: int = Field(foreign_key="exercises.id", primary_key=True)
-    alternative_id: int = Field(foreign_key="exercises.id", primary_key=True)
+    alternative_id: int = Field(foreign_key="exercises.id", primary_key=True, index=True)
 
 
 class ExerciseCreate(ExerciseBase):

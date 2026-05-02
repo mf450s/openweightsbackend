@@ -1,9 +1,19 @@
 from datetime import datetime, timezone
 from enum import Enum
-from typing import Any
+from typing import Any, Generic, TypeVar
 
+from pydantic import BaseModel
 from sqlalchemy import Column, JSON, Numeric
 from sqlmodel import Field, SQLModel
+
+T = TypeVar("T")
+
+
+class PaginatedResponse(BaseModel, Generic[T]):
+    items: list[T]
+    total: int
+    limit: int
+    offset: int
 
 
 def utcnow() -> datetime:

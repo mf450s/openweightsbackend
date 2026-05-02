@@ -1,3 +1,5 @@
+import time
+
 from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 from sqlmodel import Session, and_, delete, or_, select
 
@@ -25,6 +27,26 @@ from app.services.persistence import no_content_response, save_and_refresh
 router = APIRouter()
 
 
+_CACHE_TTL = 300
+_cache: dict[str, tuple[float, list]] = {}
+
+
+def _cached_query(key: str, ttl: int, query_fn):
+    now = time.monotonic()
+    if key in _cache:
+        timestamp, data = _cache[key]
+        if now - timestamp < ttl:
+            return data
+    data = query_fn()
+    _cache[key] = (now, data)
+    return data
+
+
+def _invalidate_cache(*keys: str) -> None:
+    for key in keys:
+        _cache.pop(key, None)
+
+
 def _can_modify_exercise(exercise: Exercise, user: User) -> bool:
     return exercise.created_by_user_id == user.id
 
@@ -35,8 +57,12 @@ def list_muscle_groups(
     offset: int = Query(default=0, ge=0),
     session: Session = Depends(get_session),
 ) -> list[MuscleGroup]:
-    statement = select(MuscleGroup).order_by(MuscleGroup.name).offset(offset).limit(limit)
-    return list(session.exec(statement).all())
+    def _query():
+        statement = select(MuscleGroup).order_by(MuscleGroup.name).offset(offset).limit(limit)
+        return list(session.exec(statement).all())
+    if offset == 0:
+        return _cached_query("muscle_groups", _CACHE_TTL, _query)
+    return _query()
 
 
 @router.post("/muscle-groups/", response_model=MuscleGroupRead, status_code=status.HTTP_201_CREATED)
@@ -53,7 +79,9 @@ def create_muscle_group(
         )
 
     group = MuscleGroup(name=payload.name)
-    return save_and_refresh(session, group)
+    result = save_and_refresh(session, group)
+    _invalidate_cache("muscle_groups")
+    return result
 
 
 @router.get("/muscle-regions/", response_model=list[MuscleRegionRead])
@@ -63,11 +91,16 @@ def list_muscle_regions(
     offset: int = Query(default=0, ge=0),
     session: Session = Depends(get_session),
 ) -> list[MuscleRegion]:
-    statement = select(MuscleRegion)
-    if group_id is not None:
-        statement = statement.where(MuscleRegion.group_id == group_id)
-    statement = statement.order_by(MuscleRegion.name).offset(offset).limit(limit)
-    return list(session.exec(statement).all())
+    def _query():
+        statement = select(MuscleRegion)
+        if group_id is not None:
+            statement = statement.where(MuscleRegion.group_id == group_id)
+        statement = statement.order_by(MuscleRegion.name).offset(offset).limit(limit)
+        return list(session.exec(statement).all())
+    cache_key = f"muscle_regions:{group_id}"
+    if offset == 0 and group_id is not None:
+        return _cached_query(cache_key, _CACHE_TTL, _query)
+    return _query()
 
 
 @router.post("/muscle-regions/", response_model=MuscleRegionRead, status_code=status.HTTP_201_CREATED)
@@ -97,7 +130,9 @@ def create_muscle_region(
         )
 
     region = MuscleRegion(name=payload.name, group_id=payload.group_id)
-    return save_and_refresh(session, region)
+    result = save_and_refresh(session, region)
+    _invalidate_cache(f"muscle_regions:{payload.group_id}")
+    return result
 
 
 @router.get("/", response_model=list[ExerciseRead])
@@ -114,11 +149,9 @@ def list_exercises(
     else:
         statement = (
             select(Exercise)
-            .where(
-                or_(
-                    Exercise.is_public.is_(True),
-                    Exercise.created_by_user_id == current_user.id,
-                )
+            .where(Exercise.is_public.is_(True))
+            .union(
+                select(Exercise).where(Exercise.created_by_user_id == current_user.id)
             )
             .order_by(Exercise.name)
             .offset(offset)
@@ -220,11 +253,13 @@ def delete_exercise(
     if not _can_modify_exercise(exercise, current_user):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not enough permissions.")
 
-    template_usage = session.exec(
-        select(TemplateExercise).where(TemplateExercise.exercise_id == exercise_id)
-    ).first()
-    session_usage = session.exec(select(SessionSet).where(SessionSet.exercise_id == exercise_id)).first()
-    if template_usage or session_usage:
+    usage = session.exec(
+        select(TemplateExercise.id).where(TemplateExercise.exercise_id == exercise_id)
+        .union(
+            select(SessionSet.id).where(SessionSet.exercise_id == exercise_id)
+        )
+    ).scalars().first()
+    if usage is not None:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
             detail="Exercise is used in templates or sessions and cannot be deleted.",
@@ -255,18 +290,15 @@ def list_exercise_alternatives(
         exercise_id=exercise_id,
         user_id=current_user.id if current_user is not None else None,
     )
-    relation_rows = session.exec(
-        select(ExerciseAlternative).where(
-            or_(
-                ExerciseAlternative.exercise_id == exercise.id,
-                ExerciseAlternative.alternative_id == exercise.id,
+    alternative_ids = session.exec(
+        select(ExerciseAlternative.alternative_id).where(
+            ExerciseAlternative.exercise_id == exercise.id
+        ).union(
+            select(ExerciseAlternative.exercise_id).where(
+                ExerciseAlternative.alternative_id == exercise.id
             )
         )
-    ).all()
-
-    alternative_ids = {
-        row.alternative_id if row.exercise_id == exercise.id else row.exercise_id for row in relation_rows
-    }
+    ).scalars().all()
     if not alternative_ids:
         return []
 

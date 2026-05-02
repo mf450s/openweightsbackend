@@ -2,10 +2,11 @@ from fastapi import Response, status
 from sqlmodel import Session, SQLModel
 
 
-def save_and_refresh(session: Session, instance: SQLModel) -> SQLModel:
+def save_and_refresh(session: Session, instance: SQLModel, refresh: bool = True) -> SQLModel:
     session.add(instance)
     session.commit()
-    session.refresh(instance)
+    if refresh:
+        session.refresh(instance)
     return instance
 
 
