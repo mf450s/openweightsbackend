@@ -42,6 +42,7 @@ uvicorn app.main:app --reload
 - Tests use `TestClient(app)` with dependency override of `get_session`
 - `session` fixture yields a fresh SQLModel Session, tables created/dropped per fixture
 - No lint/typecheck config in pyproject.toml — only pytest and coverage
+- Always write tests for new features/changes where possible
 
 ## Database
 

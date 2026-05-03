@@ -1,9 +1,19 @@
-from fastapi import APIRouter, Depends, HTTPException, status
+import secrets
+from datetime import datetime, timedelta, timezone
+
+from fastapi import APIRouter, Depends, HTTPException, Response, status
 from sqlmodel import Session, select
 
-from app.core.security import create_access_token, hash_password, verify_password
+from app.core.config import get_settings
+from app.core.security import (
+    create_access_token,
+    generate_refresh_token,
+    hash_refresh_token,
+    hash_password,
+    verify_password,
+)
 from app.db.session import get_session
-from app.models.user import AuthToken, LoginRequest, User, UserCreate, UserRead
+from app.models.user import AuthToken, LoginRequest, RefreshRequest, RefreshToken, User, UserCreate, UserRead
 from app.services.persistence import save_and_refresh
 
 router = APIRouter()
@@ -44,7 +54,106 @@ def login_user(
             detail="User ID is missing.",
         )
 
+    settings = get_settings()
+    refresh_plain, refresh_hashed = generate_refresh_token()
+    refresh_token = RefreshToken(
+        user_id=user.id,
+        token_hash=refresh_hashed,
+        family_id=secrets.token_hex(16),
+        expires_at=datetime.now(timezone.utc) + timedelta(days=settings.refresh_token_expire_days),
+    )
+    session.add(refresh_token)
+    session.commit()
+
     return AuthToken(
         access_token=create_access_token(user.id),
+        refresh_token=refresh_plain,
         user=UserRead.model_validate(user),
     )
+
+
+@router.post("/refresh", response_model=AuthToken)
+def refresh_token(
+    payload: RefreshRequest, session: Session = Depends(get_session)
+) -> AuthToken:
+    token_hash = hash_refresh_token(payload.refresh_token)
+
+    stored = session.exec(
+        select(RefreshToken).where(RefreshToken.token_hash == token_hash)
+    ).first()
+
+    if stored is None:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid refresh token.",
+        )
+
+    if stored.expires_at.replace(tzinfo=timezone.utc) < datetime.now(timezone.utc):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Refresh token has expired.",
+        )
+
+    if stored.revoked:
+        _revoke_all_user_tokens(session, stored.user_id)
+        session.commit()
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Refresh token has been revoked.",
+        )
+
+    stored.revoked = True
+    session.add(stored)
+
+    settings = get_settings()
+    new_plain, new_hashed = generate_refresh_token()
+    new_refresh = RefreshToken(
+        user_id=stored.user_id,
+        token_hash=new_hashed,
+        family_id=stored.family_id,
+        expires_at=datetime.now(timezone.utc) + timedelta(days=settings.refresh_token_expire_days),
+    )
+    session.add(new_refresh)
+    session.commit()
+
+    user = session.get(User, stored.user_id)
+    if user is None:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="User not found.",
+        )
+
+    return AuthToken(
+        access_token=create_access_token(stored.user_id),
+        refresh_token=new_plain,
+        user=UserRead.model_validate(user),
+    )
+
+
+@router.post("/logout", status_code=status.HTTP_204_NO_CONTENT)
+def logout_user(
+    payload: RefreshRequest, session: Session = Depends(get_session)
+) -> Response:
+    token_hash = hash_refresh_token(payload.refresh_token)
+    stored = session.exec(
+        select(RefreshToken).where(RefreshToken.token_hash == token_hash)
+    ).first()
+
+    if stored is not None:
+        stored.revoked = True
+        session.add(stored)
+        session.commit()
+
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+def _revoke_all_user_tokens(session: Session, user_id: int) -> None:
+    active = session.exec(
+        select(RefreshToken).where(
+            RefreshToken.user_id == user_id,
+            RefreshToken.revoked == False,
+        )
+    ).all()
+    for t in active:
+        t.revoked = True
+    session.add_all(active)

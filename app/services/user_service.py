@@ -4,7 +4,7 @@ from sqlmodel import Session, delete, select
 from app.models.exercise import Exercise
 from app.models.session import SessionSet, WorkoutSession
 from app.models.template import TemplateExercise, TrainingSplit, WorkoutTemplate
-from app.models.user import User, UserSettings
+from app.models.user import RefreshToken, User, UserSettings
 
 
 def delete_user_related_data(session: Session, user: User) -> None:
@@ -17,6 +17,8 @@ def delete_user_related_data(session: Session, user: User) -> None:
     session.exec(delete(TemplateExercise).where(TemplateExercise.template_id.in_(template_ids)))
     session.exec(delete(WorkoutTemplate).where(WorkoutTemplate.split_id.in_(split_ids)))
     session.exec(delete(TrainingSplit).where(TrainingSplit.user_id == user.id))
+
+    session.exec(delete(RefreshToken).where(RefreshToken.user_id == user.id))
 
     user_settings = session.get(UserSettings, user.id)
     if user_settings is not None:

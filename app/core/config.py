@@ -11,6 +11,7 @@ class Settings(BaseSettings):
     database_url: str = "sqlite:///./openweights.db"
     auth_secret_key: SecretStr = SecretStr("change-me-in-production")
     auth_token_expire_minutes: int = 60 * 24 * 7
+    refresh_token_expire_days: int = 30
 
     model_config = SettingsConfigDict(
         env_file=".env",

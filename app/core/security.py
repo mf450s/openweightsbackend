@@ -102,3 +102,13 @@ def decode_access_token(token: str) -> dict[str, str | int]:
         raise ValueError("Token has expired.")
 
     return payload
+
+
+def generate_refresh_token() -> tuple[str, str]:
+    token = secrets.token_urlsafe(48)
+    hashed = hashlib.sha256(token.encode()).hexdigest()
+    return token, hashed
+
+
+def hash_refresh_token(token: str) -> str:
+    return hashlib.sha256(token.encode()).hexdigest()
