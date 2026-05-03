@@ -21,7 +21,6 @@ def register_user(payload: UserCreate, session: Session = Depends(get_session)) 
     user = User(
         email=payload.email,
         name=payload.name,
-        default_pause_seconds=payload.default_pause_seconds,
         password_hash=hash_password(payload.password),
     )
     return save_and_refresh(session, user)

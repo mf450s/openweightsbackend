@@ -30,7 +30,6 @@ def upgrade() -> None:
         "users",
         sa.Column("id", sa.Integer(), primary_key=True),
         sa.Column("name", sa.String(), nullable=False),
-        sa.Column("default_pause_seconds", sa.Integer(), nullable=True),
         sa.Column("email", sa.String(), nullable=False, unique=True),
         sa.Column("password_hash", sa.String(), nullable=False),
         sa.Column("created_at", sa.DateTime(timezone=True), nullable=False),

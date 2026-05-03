@@ -12,7 +12,6 @@ Table muscleRegions {
 Table users {
   id integer [pk, increment]
   name varchar [not null]
-  default_pause_seconds integer
   email varchar [not null, unique]
   password_hash varchar [not null]
   created_at timestamp [not null]

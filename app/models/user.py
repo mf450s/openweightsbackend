@@ -14,7 +14,6 @@ if TYPE_CHECKING:
 
 class UserBase(SQLModel):
     name: str
-    default_pause_seconds: int | None = Field(default=None, ge=0)
     email: str = Field(index=True, unique=True)
 
     @field_validator("email")
@@ -74,7 +73,6 @@ class UserRead(UserBase):
 class UserUpdate(SQLModel):
     name: str | None = None
     email: str | None = None
-    default_pause_seconds: int | None = Field(default=None, ge=0)
 
     @field_validator("email")
     @classmethod

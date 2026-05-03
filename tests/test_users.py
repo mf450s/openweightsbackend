@@ -3,7 +3,6 @@ def register_user(client, **overrides):
         "name": "Max Mustermann",
         "email": "max@example.com",
         "password": "supersecret",
-        "default_pause_seconds": 90,
     }
     payload.update(overrides)
     return client.post("/api/v1/auth/register", json=payload)
@@ -57,12 +56,11 @@ def test_profile_update_and_password_change_require_auth(client):
 
     update_response = client.patch(
         "/api/v1/users/me",
-        json={"name": "Maximilian", "default_pause_seconds": 120},
+        json={"name": "Maximilian"},
         headers=headers,
     )
     assert update_response.status_code == 200
     assert update_response.json()["name"] == "Maximilian"
-    assert update_response.json()["default_pause_seconds"] == 120
 
     password_response = client.post(
         "/api/v1/users/me/password",

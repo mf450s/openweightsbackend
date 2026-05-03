@@ -3,7 +3,6 @@ def register_user(client, *, email, name):
         "name": name,
         "email": email,
         "password": "supersecret",
-        "default_pause_seconds": 90,
     }
     return client.post("/api/v1/auth/register", json=payload)
 
