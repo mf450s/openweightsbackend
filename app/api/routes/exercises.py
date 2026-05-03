@@ -18,11 +18,13 @@ from app.models.exercise import (
     MuscleRegionCreate,
     MuscleRegionRead,
 )
-from app.models.session import SessionSet
+from app.models.progression import Estimated1RmPoint, ExerciseSessionHistory, ExerciseSetRead
+from app.models.session import SessionSet, WorkoutSession
 from app.models.template import TemplateExercise
 from app.models.user import User
 from app.services.exercise_access import can_access_exercise, get_accessible_exercise_or_404
 from app.services.persistence import no_content_response, save_and_refresh
+from app.services.progression_service import get_best_1rm_for_session
 
 router = APIRouter()
 
@@ -277,6 +279,86 @@ def delete_exercise(
     session.delete(exercise)
     session.commit()
     return no_content_response()
+
+
+@router.get("/{exercise_id}/history", response_model=list[ExerciseSessionHistory])
+def exercise_history(
+    exercise_id: int,
+    current_user: User = Depends(get_current_user),
+    session: Session = Depends(get_session),
+) -> list[dict]:
+    get_accessible_exercise_or_404(session, exercise_id, current_user.id)
+
+    rows = session.exec(
+        select(SessionSet, WorkoutSession)
+        .join(WorkoutSession)
+        .where(
+            SessionSet.exercise_id == exercise_id,
+            WorkoutSession.user_id == current_user.id,
+            SessionSet.completed == True,
+        )
+        .order_by(WorkoutSession.performed_at, WorkoutSession.id, SessionSet.set_number)
+    ).all()
+
+    grouped: dict[int, dict] = {}
+    for session_set, workout_session in rows:
+        sid = workout_session.id
+        if sid not in grouped:
+            grouped[sid] = {
+                "session_id": sid,
+                "performed_at": workout_session.performed_at,
+                "sets": [],
+            }
+        grouped[sid]["sets"].append(
+            ExerciseSetRead(
+                set_number=session_set.set_number,
+                weight_kg=(
+                    float(session_set.weight_kg) if session_set.weight_kg is not None else None
+                ),
+                reps=session_set.reps,
+                rir=session_set.rir,
+            )
+        )
+
+    return list(grouped.values())
+
+
+@router.get("/{exercise_id}/1rm", response_model=list[Estimated1RmPoint])
+def exercise_1rm_history(
+    exercise_id: int,
+    current_user: User = Depends(get_current_user),
+    session: Session = Depends(get_session),
+) -> list[dict]:
+    get_accessible_exercise_or_404(session, exercise_id, current_user.id)
+
+    rows = session.exec(
+        select(SessionSet)
+        .join(WorkoutSession)
+        .where(
+            SessionSet.exercise_id == exercise_id,
+            WorkoutSession.user_id == current_user.id,
+            SessionSet.completed == True,
+        )
+        .order_by(WorkoutSession.performed_at, WorkoutSession.id, SessionSet.set_number)
+    ).all()
+
+    session_sets: dict[int, list[SessionSet]] = {}
+    session_dates: dict[int, datetime] = {}
+    for session_set in rows:
+        sid = session_set.session_id
+        session_sets.setdefault(sid, []).append(session_set)
+        if sid not in session_dates:
+            session_dates[sid] = session_set.session.performed_at
+
+    result = []
+    for sid in sorted(session_sets.keys(), key=lambda sid: session_dates[sid]):
+        best = get_best_1rm_for_session(session_sets[sid])
+        if best is not None:
+            result.append(
+                Estimated1RmPoint(performed_at=session_dates[sid], estimated_1rm=best)
+            )
+
+    return result
 
 
 @router.get("/{exercise_id}/alternatives", response_model=list[ExerciseRead])
