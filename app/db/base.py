@@ -2,7 +2,7 @@ from app.models.exercise import Exercise, ExerciseAlternative, MuscleGroup, Musc
 from app.models.progression import PersonalRecord
 from app.models.session import SessionSet, WorkoutSession
 from app.models.template import TemplateExercise, TrainingSplit, WorkoutTemplate
-from app.models.user import User, UserSettings
+from app.models.user import RefreshToken, User, UserSettings
 
 __all__ = [
     "Exercise",
@@ -10,6 +10,7 @@ __all__ = [
     "MuscleGroup",
     "MuscleRegion",
     "PersonalRecord",
+    "RefreshToken",
     "SessionSet",
     "TemplateExercise",
     "TrainingSplit",

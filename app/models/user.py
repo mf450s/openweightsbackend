@@ -42,6 +42,7 @@ class User(UserBase, TimestampedModel, table=True):
     settings: Optional["UserSettings"] = Relationship(back_populates="user")
     training_splits: List["TrainingSplit"] = Relationship(back_populates="user")
     workout_sessions: List["WorkoutSession"] = Relationship(back_populates="user")
+    refresh_tokens: List["RefreshToken"] = Relationship(back_populates="user")
 
 
 class UserSettings(SQLModel, table=True):
@@ -140,5 +141,24 @@ class LoginRequest(SQLModel):
 
 class AuthToken(SQLModel):
     access_token: str
+    refresh_token: str
     token_type: str = "bearer"
     user: UserRead
+
+
+class RefreshRequest(SQLModel):
+    refresh_token: str
+
+
+class RefreshToken(SQLModel, table=True):
+    __tablename__ = "refresh_tokens"
+
+    id: int | None = Field(default=None, primary_key=True)
+    user_id: int = Field(foreign_key="users.id", index=True)
+    token_hash: str = Field(index=True, unique=True)
+    family_id: str = Field(index=True)
+    expires_at: datetime
+    revoked: bool = Field(default=False)
+    created_at: datetime = Field(default_factory=utcnow)
+
+    user: User = Relationship(back_populates="refresh_tokens")
