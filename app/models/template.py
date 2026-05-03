@@ -19,10 +19,22 @@ def _normalize_template_name(value: str) -> str:
     return normalized
 
 
+def _normalize_split_name(value: str) -> str:
+    normalized = value.strip()
+    if len(normalized) < 2:
+        raise ValueError("Split name must be at least 2 characters long.")
+    return normalized
+
+
 class TrainingSplitBase(SQLModel):
     user_id: int | None = Field(default=None, foreign_key="users.id", index=True)
     name: str
     description: str | None = None
+
+    @field_validator("name")
+    @classmethod
+    def validate_name(cls, value: str) -> str:
+        return _normalize_split_name(value)
 
 
 class TrainingSplit(TrainingSplitBase, TimestampedModel, table=True):
@@ -32,6 +44,27 @@ class TrainingSplit(TrainingSplitBase, TimestampedModel, table=True):
 
     user: "User" = Relationship(back_populates="training_splits")
     workout_templates: list["WorkoutTemplate"] = Relationship(back_populates="split")
+
+
+class TrainingSplitCreate(TrainingSplitBase):
+    pass
+
+
+class TrainingSplitRead(TrainingSplitBase):
+    id: int
+    created_at: datetime
+
+
+class TrainingSplitUpdate(SQLModel):
+    name: str | None = None
+    description: str | None = None
+
+    @field_validator("name")
+    @classmethod
+    def validate_name(cls, value: str | None) -> str | None:
+        if value is None:
+            return value
+        return _normalize_split_name(value)
 
 
 class WorkoutTemplateBase(SQLModel):
