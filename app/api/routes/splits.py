@@ -3,7 +3,13 @@ from sqlmodel import Session, select
 
 from app.api.deps import get_current_user
 from app.db.session import get_session
-from app.models.template import TrainingSplit, TrainingSplitCreate, TrainingSplitRead, TrainingSplitUpdate, WorkoutTemplate
+from app.models.template import (
+    TrainingSplit,
+    TrainingSplitCreate,
+    TrainingSplitRead,
+    TrainingSplitUpdate,
+    WorkoutTemplate,
+)
 from app.models.user import User
 from app.services.persistence import no_content_response, save_and_refresh
 

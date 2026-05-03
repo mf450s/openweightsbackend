@@ -14,6 +14,7 @@ UNAUTHORIZED_EXCEPTION = HTTPException(
     headers={"WWW-Authenticate": "Bearer"},
 )
 
+
 def _get_user_from_credentials(
     credentials: HTTPAuthorizationCredentials,
     session: Session,

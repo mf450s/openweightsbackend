@@ -1,5 +1,5 @@
 from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
-from sqlmodel import Session, delete, select
+from sqlmodel import Session, select
 
 from app.api.deps import get_current_user
 from app.db.session import get_session
@@ -70,7 +70,10 @@ def _resolve_template_exercise_for_session_set(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Selected template exercise does not exist.",
         )
-    if workout_session.template_id is not None and template_exercise.template_id != workout_session.template_id:
+    if (
+        workout_session.template_id is not None
+        and template_exercise.template_id != workout_session.template_id
+    ):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Selected template exercise does not belong to this session template.",
@@ -162,7 +165,9 @@ def list_session_sets(
     return list(session.exec(statement).all())
 
 
-@router.post("/{session_id}/sets", response_model=SessionSetRead, status_code=status.HTTP_201_CREATED)
+@router.post(
+    "/{session_id}/sets", response_model=SessionSetRead, status_code=status.HTTP_201_CREATED
+)
 def create_session_set(
     session_id: int,
     payload: SessionSetCreate,

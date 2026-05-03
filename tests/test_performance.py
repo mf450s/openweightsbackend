@@ -46,7 +46,9 @@ def test_cache_control_not_on_mutations(client):
         headers=headers,
     )
     assert response.status_code == 201
-    assert "cache-control" not in response.headers or "private" not in response.headers.get("cache-control", "")
+    assert "cache-control" not in response.headers or "private" not in response.headers.get(
+        "cache-control", ""
+    )
 
 
 def test_muscle_group_caching(client):

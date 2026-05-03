@@ -79,7 +79,9 @@ def test_authenticated_user_can_build_and_log_workout_happy_path(client):
         headers=headers,
     )
     assert alternative_response.status_code == 204
-    alternatives_response = client.get(f"/api/v1/exercises/{bench_id}/alternatives", headers=headers)
+    alternatives_response = client.get(
+        f"/api/v1/exercises/{bench_id}/alternatives", headers=headers
+    )
     assert alternatives_response.status_code == 200
     assert [item["id"] for item in alternatives_response.json()] == [dumbbell_id]
 

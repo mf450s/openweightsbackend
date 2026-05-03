@@ -1,4 +1,4 @@
-from typing import Any, List, Optional, TYPE_CHECKING
+from typing import TYPE_CHECKING, List, Optional
 
 from pydantic import field_validator
 from sqlalchemy import UniqueConstraint

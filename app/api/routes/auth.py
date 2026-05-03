@@ -8,12 +8,20 @@ from app.core.config import get_settings
 from app.core.security import (
     create_access_token,
     generate_refresh_token,
-    hash_refresh_token,
     hash_password,
+    hash_refresh_token,
     verify_password,
 )
 from app.db.session import get_session
-from app.models.user import AuthToken, LoginRequest, RefreshRequest, RefreshToken, User, UserCreate, UserRead
+from app.models.user import (
+    AuthToken,
+    LoginRequest,
+    RefreshRequest,
+    RefreshToken,
+    User,
+    UserCreate,
+    UserRead,
+)
 from app.services.persistence import save_and_refresh
 
 router = APIRouter()
@@ -37,9 +45,7 @@ def register_user(payload: UserCreate, session: Session = Depends(get_session)) 
 
 
 @router.post("/login", response_model=AuthToken)
-def login_user(
-    payload: LoginRequest, session: Session = Depends(get_session)
-) -> AuthToken:
+def login_user(payload: LoginRequest, session: Session = Depends(get_session)) -> AuthToken:
     user = session.exec(select(User).where(User.email == payload.email)).first()
     if user is None or not verify_password(payload.password, user.password_hash):
         raise HTTPException(
@@ -73,14 +79,10 @@ def login_user(
 
 
 @router.post("/refresh", response_model=AuthToken)
-def refresh_token(
-    payload: RefreshRequest, session: Session = Depends(get_session)
-) -> AuthToken:
+def refresh_token(payload: RefreshRequest, session: Session = Depends(get_session)) -> AuthToken:
     token_hash = hash_refresh_token(payload.refresh_token)
 
-    stored = session.exec(
-        select(RefreshToken).where(RefreshToken.token_hash == token_hash)
-    ).first()
+    stored = session.exec(select(RefreshToken).where(RefreshToken.token_hash == token_hash)).first()
 
     if stored is None:
         raise HTTPException(
@@ -131,13 +133,9 @@ def refresh_token(
 
 
 @router.post("/logout", status_code=status.HTTP_204_NO_CONTENT)
-def logout_user(
-    payload: RefreshRequest, session: Session = Depends(get_session)
-) -> Response:
+def logout_user(payload: RefreshRequest, session: Session = Depends(get_session)) -> Response:
     token_hash = hash_refresh_token(payload.refresh_token)
-    stored = session.exec(
-        select(RefreshToken).where(RefreshToken.token_hash == token_hash)
-    ).first()
+    stored = session.exec(select(RefreshToken).where(RefreshToken.token_hash == token_hash)).first()
 
     if stored is not None:
         stored.revoked = True
@@ -151,7 +149,7 @@ def _revoke_all_user_tokens(session: Session, user_id: int) -> None:
     active = session.exec(
         select(RefreshToken).where(
             RefreshToken.user_id == user_id,
-            RefreshToken.revoked == False,
+            not RefreshToken.revoked,
         )
     ).all()
     for t in active:
