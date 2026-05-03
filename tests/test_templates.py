@@ -37,7 +37,9 @@ def test_template_crud_and_template_exercise_workflow(client):
     other_headers = auth_headers(client, email="other@example.com")
 
     public_exercise = create_exercise(client, owner_headers, name="Front Squat", is_public=True)
-    private_exercise = create_exercise(client, owner_headers, name="Paused Front Squat", is_public=False)
+    private_exercise = create_exercise(
+        client, owner_headers, name="Paused Front Squat", is_public=False
+    )
     assert public_exercise.status_code == 201
     assert private_exercise.status_code == 201
     public_exercise_id = public_exercise.json()["id"]

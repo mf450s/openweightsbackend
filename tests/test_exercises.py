@@ -154,7 +154,9 @@ def test_exercise_endpoints_require_auth_where_needed(client):
     )
     assert create_without_auth.status_code == 401
 
-    create_group_without_auth = client.post("/api/v1/exercises/muscle-groups/", json={"name": "Legs"})
+    create_group_without_auth = client.post(
+        "/api/v1/exercises/muscle-groups/", json={"name": "Legs"}
+    )
     assert create_group_without_auth.status_code == 401
 
     exercise = create_exercise(client, headers, name="Back Squat", is_public=True)

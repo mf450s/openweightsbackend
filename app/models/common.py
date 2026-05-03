@@ -3,7 +3,7 @@ from enum import Enum
 from typing import Any, Generic, TypeVar
 
 from pydantic import BaseModel
-from sqlalchemy import Column, JSON, Numeric
+from sqlalchemy import JSON, Column, Numeric
 from sqlmodel import Field, SQLModel
 
 T = TypeVar("T")

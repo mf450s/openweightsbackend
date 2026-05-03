@@ -24,6 +24,10 @@ def delete_user_related_data(session: Session, user: User) -> None:
     if user_settings is not None:
         session.delete(user_settings)
 
-    session.exec(update(Exercise).where(Exercise.created_by_user_id == user.id).values(created_by_user_id=None))
+    session.exec(
+        update(Exercise)
+        .where(Exercise.created_by_user_id == user.id)
+        .values(created_by_user_id=None)
+    )
 
     session.delete(user)

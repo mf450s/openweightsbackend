@@ -215,14 +215,18 @@ def test_session_set_template_exercise_validation_paths(client):
 
     wrong_template_link = client.post(
         f"/api/v1/sessions/{session_id}/sets",
-        json={"template_exercise_id": template_exercise_b.json()['id'], "set_number": 1},
+        json={"template_exercise_id": template_exercise_b.json()["id"], "set_number": 1},
         headers=headers,
     )
     assert wrong_template_link.status_code == 400
 
     valid_set = client.post(
         f"/api/v1/sessions/{session_id}/sets",
-        json={"template_exercise_id": template_exercise_a.json()['id'], "set_number": 1, "reps": 10},
+        json={
+            "template_exercise_id": template_exercise_a.json()["id"],
+            "set_number": 1,
+            "reps": 10,
+        },
         headers=headers,
     )
     assert valid_set.status_code == 201
@@ -230,7 +234,7 @@ def test_session_set_template_exercise_validation_paths(client):
 
     wrong_template_link_update = client.patch(
         f"/api/v1/sessions/{session_id}/sets/{set_id}",
-        json={"template_exercise_id": template_exercise_b.json()['id']},
+        json={"template_exercise_id": template_exercise_b.json()["id"]},
         headers=headers,
     )
     assert wrong_template_link_update.status_code == 400

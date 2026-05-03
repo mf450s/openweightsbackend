@@ -127,7 +127,9 @@ def add_template_exercise(
     return save_and_refresh(session, template_exercise)
 
 
-@router.patch("/{template_id}/exercises/{template_exercise_id}", response_model=TemplateExerciseRead)
+@router.patch(
+    "/{template_id}/exercises/{template_exercise_id}", response_model=TemplateExerciseRead
+)
 def update_template_exercise(
     template_id: int,
     template_exercise_id: int,
@@ -151,7 +153,9 @@ def update_template_exercise(
     return save_and_refresh(session, template_exercise)
 
 
-@router.delete("/{template_id}/exercises/{template_exercise_id}", status_code=status.HTTP_204_NO_CONTENT)
+@router.delete(
+    "/{template_id}/exercises/{template_exercise_id}", status_code=status.HTTP_204_NO_CONTENT
+)
 def delete_template_exercise(
     template_id: int,
     template_exercise_id: int,

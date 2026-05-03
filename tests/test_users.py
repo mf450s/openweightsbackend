@@ -147,7 +147,9 @@ def test_profile_update_rejects_duplicate_email(client):
     assert register_user(client, email="first@example.com", name="First").status_code == 201
     assert register_user(client, email="second@example.com", name="Second").status_code == 201
 
-    token = login_user(client, email="first@example.com", password="supersecret").json()["access_token"]
+    token = login_user(client, email="first@example.com", password="supersecret").json()[
+        "access_token"
+    ]
     headers = {"Authorization": f"Bearer {token}"}
 
     response = client.patch(

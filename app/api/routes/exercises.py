@@ -1,4 +1,5 @@
 import time
+from datetime import datetime
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 from sqlmodel import Session, and_, delete, or_, select
@@ -62,6 +63,7 @@ def list_muscle_groups(
     def _query():
         statement = select(MuscleGroup).order_by(MuscleGroup.name).offset(offset).limit(limit)
         return list(session.exec(statement).all())
+
     if offset == 0:
         return _cached_query("muscle_groups", _CACHE_TTL, _query)
     return _query()
@@ -99,13 +101,16 @@ def list_muscle_regions(
             statement = statement.where(MuscleRegion.group_id == group_id)
         statement = statement.order_by(MuscleRegion.name).offset(offset).limit(limit)
         return list(session.exec(statement).all())
+
     cache_key = f"muscle_regions:{group_id}"
     if offset == 0 and group_id is not None:
         return _cached_query(cache_key, _CACHE_TTL, _query)
     return _query()
 
 
-@router.post("/muscle-regions/", response_model=MuscleRegionRead, status_code=status.HTTP_201_CREATED)
+@router.post(
+    "/muscle-regions/", response_model=MuscleRegionRead, status_code=status.HTTP_201_CREATED
+)
 def create_muscle_region(
     payload: MuscleRegionCreate,
     _: User = Depends(get_current_user),
@@ -146,15 +151,17 @@ def list_exercises(
 ) -> list[Exercise]:
     if current_user is None:
         statement = (
-            select(Exercise).where(Exercise.is_public.is_(True)).order_by(Exercise.name).offset(offset).limit(limit)
+            select(Exercise)
+            .where(Exercise.is_public.is_(True))
+            .order_by(Exercise.name)
+            .offset(offset)
+            .limit(limit)
         )
     else:
         statement = (
             select(Exercise)
             .where(Exercise.is_public.is_(True))
-            .union(
-                select(Exercise).where(Exercise.created_by_user_id == current_user.id)
-            )
+            .union(select(Exercise).where(Exercise.created_by_user_id == current_user.id))
             .order_by(Exercise.name)
             .offset(offset)
             .limit(limit)
@@ -181,7 +188,10 @@ def create_exercise(
     current_user: User = Depends(get_current_user),
     session: Session = Depends(get_session),
 ) -> Exercise:
-    if payload.muscle_region_id is not None and session.get(MuscleRegion, payload.muscle_region_id) is None:
+    if (
+        payload.muscle_region_id is not None
+        and session.get(MuscleRegion, payload.muscle_region_id) is None
+    ):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Selected muscle region does not exist.",
@@ -255,12 +265,15 @@ def delete_exercise(
     if not _can_modify_exercise(exercise, current_user):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not enough permissions.")
 
-    usage = session.exec(
-        select(TemplateExercise.id).where(TemplateExercise.exercise_id == exercise_id)
-        .union(
-            select(SessionSet.id).where(SessionSet.exercise_id == exercise_id)
+    usage = (
+        session.exec(
+            select(TemplateExercise.id)
+            .where(TemplateExercise.exercise_id == exercise_id)
+            .union(select(SessionSet.id).where(SessionSet.exercise_id == exercise_id))
         )
-    ).scalars().first()
+        .scalars()
+        .first()
+    )
     if usage is not None:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
@@ -295,7 +308,7 @@ def exercise_history(
         .where(
             SessionSet.exercise_id == exercise_id,
             WorkoutSession.user_id == current_user.id,
-            SessionSet.completed == True,
+            SessionSet.completed,
         )
         .order_by(WorkoutSession.performed_at, WorkoutSession.id, SessionSet.set_number)
     ).all()
@@ -337,7 +350,7 @@ def exercise_1rm_history(
         .where(
             SessionSet.exercise_id == exercise_id,
             WorkoutSession.user_id == current_user.id,
-            SessionSet.completed == True,
+            SessionSet.completed,
         )
         .order_by(WorkoutSession.performed_at, WorkoutSession.id, SessionSet.set_number)
     ).all()
@@ -354,9 +367,7 @@ def exercise_1rm_history(
     for sid in sorted(session_sets.keys(), key=lambda sid: session_dates[sid]):
         best = get_best_1rm_for_session(session_sets[sid])
         if best is not None:
-            result.append(
-                Estimated1RmPoint(performed_at=session_dates[sid], estimated_1rm=best)
-            )
+            result.append(Estimated1RmPoint(performed_at=session_dates[sid], estimated_1rm=best))
 
     return result
 
@@ -372,20 +383,26 @@ def list_exercise_alternatives(
         exercise_id=exercise_id,
         user_id=current_user.id if current_user is not None else None,
     )
-    alternative_ids = session.exec(
-        select(ExerciseAlternative.alternative_id).where(
-            ExerciseAlternative.exercise_id == exercise.id
-        ).union(
-            select(ExerciseAlternative.exercise_id).where(
-                ExerciseAlternative.alternative_id == exercise.id
+    alternative_ids = (
+        session.exec(
+            select(ExerciseAlternative.alternative_id)
+            .where(ExerciseAlternative.exercise_id == exercise.id)
+            .union(
+                select(ExerciseAlternative.exercise_id).where(
+                    ExerciseAlternative.alternative_id == exercise.id
+                )
             )
         )
-    ).scalars().all()
+        .scalars()
+        .all()
+    )
     if not alternative_ids:
         return []
 
     alternatives = session.exec(
-        select(Exercise).where(Exercise.id.in_(alternative_ids)).order_by(Exercise.name, Exercise.id)
+        select(Exercise)
+        .where(Exercise.id.in_(alternative_ids))
+        .order_by(Exercise.name, Exercise.id)
     ).all()
     current_user_id = current_user.id if current_user is not None else None
     return [item for item in alternatives if can_access_exercise(item, current_user_id)]
@@ -425,7 +442,9 @@ def add_exercise_alternative(
     return no_content_response()
 
 
-@router.delete("/{exercise_id}/alternatives/{alternative_id}", status_code=status.HTTP_204_NO_CONTENT)
+@router.delete(
+    "/{exercise_id}/alternatives/{alternative_id}", status_code=status.HTTP_204_NO_CONTENT
+)
 def remove_exercise_alternative(
     exercise_id: int,
     alternative_id: int,
