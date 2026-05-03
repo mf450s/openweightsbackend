@@ -68,10 +68,12 @@ def test_sessions_crud_and_set_workflow(client):
     created_session = create_session_response.json()
     session_id = created_session["id"]
     assert created_session["notes"] == "morning session"
+    assert created_session["active_session"] is True
 
     list_owner_sessions = client.get("/api/v1/sessions/", headers=owner_headers)
     assert list_owner_sessions.status_code == 200
     assert len(list_owner_sessions.json()) == 1
+    assert list_owner_sessions.json()[0]["active_session"] is True
 
     list_other_sessions = client.get("/api/v1/sessions/", headers=other_headers)
     assert list_other_sessions.status_code == 200
@@ -87,6 +89,14 @@ def test_sessions_crud_and_set_workflow(client):
     )
     assert update_session_response.status_code == 200
     assert update_session_response.json()["notes"] == "updated notes"
+
+    finish_session_response = client.patch(
+        f"/api/v1/sessions/{session_id}",
+        json={"active_session": False},
+        headers=owner_headers,
+    )
+    assert finish_session_response.status_code == 200
+    assert finish_session_response.json()["active_session"] is False
 
     add_set_response = client.post(
         f"/api/v1/sessions/{session_id}/sets",

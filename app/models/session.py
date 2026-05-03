@@ -34,6 +34,7 @@ class WorkoutSessionBase(SQLModel):
     notes: str | None = None
     started_at: datetime | None = None
     ended_at: datetime | None = None
+    active_session: bool = True
 
     @field_validator("notes")
     @classmethod
@@ -87,6 +88,7 @@ class WorkoutSessionUpdate(SQLModel):
     notes: str | None = None
     started_at: datetime | None = None
     ended_at: datetime | None = None
+    active_session: bool | None = None
 
     @field_validator("notes")
     @classmethod

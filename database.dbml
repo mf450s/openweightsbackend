@@ -78,6 +78,7 @@ Table workout_sessions {
   notes text
   started_at timestamp
   ended_at timestamp
+  active_session boolean [not null, default: true]
 }
 
 Table session_sets {
