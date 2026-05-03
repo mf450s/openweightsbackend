@@ -17,6 +17,7 @@ from app.models.template import TemplateExercise, WorkoutTemplate
 from app.models.user import User
 from app.services.exercise_access import ensure_accessible_exercise_or_400
 from app.services.persistence import no_content_response, save_and_refresh
+from app.services.progression_service import check_and_create_pr
 from app.services.session_service import delete_workout_session_with_sets
 
 router = APIRouter()
@@ -167,7 +168,7 @@ def create_session_set(
     payload: SessionSetCreate,
     current_user: User = Depends(get_current_user),
     session: Session = Depends(get_session),
-) -> SessionSet:
+) -> dict:
     workout_session = _get_session_or_404(session, session_id, current_user)
     template_exercise = _resolve_template_exercise_for_session_set(
         session,
@@ -188,7 +189,17 @@ def create_session_set(
     session_set.session_id = session_id
     if session_set.exercise_id is None and exercise_id is not None:
         session_set.exercise_id = exercise_id
-    return save_and_refresh(session, session_set)
+    session_set = save_and_refresh(session, session_set)
+
+    set_data = SessionSetRead.model_validate(session_set).model_dump()
+    if exercise_id is not None:
+        pr = check_and_create_pr(
+            session, current_user.id, exercise_id, session_set, workout_session.performed_at
+        )
+        if pr is not None:
+            set_data["personal_record"] = {"pr_type": pr.pr_type, "value": float(pr.value)}
+
+    return set_data
 
 
 @router.patch("/{session_id}/sets/{set_id}", response_model=SessionSetRead)
@@ -198,9 +209,10 @@ def update_session_set(
     payload: SessionSetUpdate,
     current_user: User = Depends(get_current_user),
     session: Session = Depends(get_session),
-) -> SessionSet:
+) -> dict:
     workout_session = _get_session_or_404(session, session_id, current_user)
     session_set = _get_session_set_or_404(session, session_id, set_id)
+    previous_exercise_id = session_set.exercise_id
     updates = payload.model_dump(exclude_unset=True)
     template_exercise_id = updates.get("template_exercise_id", session_set.template_exercise_id)
     template_exercise = _resolve_template_exercise_for_session_set(
@@ -220,7 +232,22 @@ def update_session_set(
     _validate_exercise_for_session_set(session, exercise_id, current_user.id)
 
     session_set.sqlmodel_update(updates)
-    return save_and_refresh(session, session_set)
+    session_set = save_and_refresh(session, session_set)
+
+    set_data = SessionSetRead.model_validate(session_set).model_dump()
+    resolved_exercise_id = exercise_id or previous_exercise_id
+    if resolved_exercise_id is not None:
+        pr = check_and_create_pr(
+            session,
+            current_user.id,
+            resolved_exercise_id,
+            session_set,
+            workout_session.performed_at,
+        )
+        if pr is not None:
+            set_data["personal_record"] = {"pr_type": pr.pr_type, "value": float(pr.value)}
+
+    return set_data
 
 
 @router.delete("/{session_id}/sets/{set_id}", status_code=status.HTTP_204_NO_CONTENT)

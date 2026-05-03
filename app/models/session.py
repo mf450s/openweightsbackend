@@ -118,6 +118,7 @@ class SessionSetCreate(SessionSetBase):
 class SessionSetRead(SessionSetBase):
     id: int
     session_id: int | None = None
+    personal_record: dict | None = None
 
 
 class SessionSetUpdate(SQLModel):
