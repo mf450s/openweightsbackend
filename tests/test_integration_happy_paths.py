@@ -49,7 +49,7 @@ def test_authenticated_user_can_build_and_log_workout_happy_path(client):
         "/api/v1/exercises/",
         json={
             "name": "Barbell Bench Press",
-            "muscle_region_id": region_id,
+            "muscle_region_ids": [region_id],
             "laterality": "bilateral",
             "is_public": True,
             "execution_notes": "  pause briefly on the chest  ",
@@ -65,7 +65,7 @@ def test_authenticated_user_can_build_and_log_workout_happy_path(client):
         "/api/v1/exercises/",
         json={
             "name": "Incline Dumbbell Press",
-            "muscle_region_id": region_id,
+            "muscle_region_ids": [region_id],
             "laterality": "bilateral",
             "is_public": True,
         },

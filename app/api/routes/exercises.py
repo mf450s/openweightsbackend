@@ -10,6 +10,7 @@ from app.models.exercise import (
     Exercise,
     ExerciseAlternative,
     ExerciseCreate,
+    ExerciseMuscleRegion,
     ExerciseRead,
     ExerciseUpdate,
     MuscleGroup,
@@ -52,6 +53,29 @@ def _invalidate_cache(*keys: str) -> None:
 
 def _can_modify_exercise(exercise: Exercise, user: User) -> bool:
     return exercise.created_by_user_id == user.id
+
+
+def _get_muscle_region_ids(session: Session, exercise_id: int) -> list[int]:
+    rows = session.exec(
+        select(ExerciseMuscleRegion.muscle_region_id)
+        .where(ExerciseMuscleRegion.exercise_id == exercise_id)
+        .order_by(ExerciseMuscleRegion.muscle_region_id)
+    ).all()
+    return list(rows)
+
+
+def _exercise_to_read(
+    exercise: Exercise, muscle_region_ids: list[int] | None = None
+) -> ExerciseRead:
+    return ExerciseRead(
+        id=exercise.id,
+        name=exercise.name,
+        laterality=exercise.laterality,
+        created_by_user_id=exercise.created_by_user_id,
+        is_public=exercise.is_public,
+        execution_notes=exercise.execution_notes,
+        muscle_region_ids=muscle_region_ids or [],
+    )
 
 
 @router.get("/muscle-groups/", response_model=list[MuscleGroupRead])
@@ -166,7 +190,11 @@ def list_exercises(
             .offset(offset)
             .limit(limit)
         )
-    return list(session.exec(statement).all())
+    exercises = list(session.exec(statement).all())
+    return [
+        _exercise_to_read(e, _get_muscle_region_ids(session, e.id))
+        for e in exercises
+    ]
 
 
 @router.get("/{exercise_id}", response_model=ExerciseRead)
@@ -174,12 +202,13 @@ def read_exercise(
     exercise_id: int,
     current_user: User | None = Depends(get_optional_current_user),
     session: Session = Depends(get_session),
-) -> Exercise:
-    return get_accessible_exercise_or_404(
+) -> ExerciseRead:
+    exercise = get_accessible_exercise_or_404(
         session=session,
         exercise_id=exercise_id,
         user_id=current_user.id if current_user is not None else None,
     )
+    return _exercise_to_read(exercise, _get_muscle_region_ids(session, exercise.id))
 
 
 @router.post("/", response_model=ExerciseRead, status_code=status.HTTP_201_CREATED)
@@ -187,15 +216,13 @@ def create_exercise(
     payload: ExerciseCreate,
     current_user: User = Depends(get_current_user),
     session: Session = Depends(get_session),
-) -> Exercise:
-    if (
-        payload.muscle_region_id is not None
-        and session.get(MuscleRegion, payload.muscle_region_id) is None
-    ):
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Selected muscle region does not exist.",
-        )
+) -> ExerciseRead:
+    for rid in payload.muscle_region_ids:
+        if session.get(MuscleRegion, rid) is None:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Muscle region {rid} does not exist.",
+            )
 
     existing = session.exec(
         select(Exercise.id).where(
@@ -213,7 +240,12 @@ def create_exercise(
 
     exercise = Exercise.model_validate(payload)
     exercise.created_by_user_id = current_user.id
-    return save_and_refresh(session, exercise)
+    exercise = save_and_refresh(session, exercise)
+    for rid in payload.muscle_region_ids:
+        session.add(ExerciseMuscleRegion(exercise_id=exercise.id, muscle_region_id=rid))
+    session.commit()
+    session.refresh(exercise)
+    return _exercise_to_read(exercise, payload.muscle_region_ids)
 
 
 @router.patch("/{exercise_id}", response_model=ExerciseRead)
@@ -222,7 +254,7 @@ def update_exercise(
     payload: ExerciseUpdate,
     current_user: User = Depends(get_current_user),
     session: Session = Depends(get_session),
-) -> Exercise:
+) -> ExerciseRead:
     exercise = get_accessible_exercise_or_404(session, exercise_id, current_user.id)
     if not _can_modify_exercise(exercise, current_user):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not enough permissions.")
@@ -244,15 +276,24 @@ def update_exercise(
                 detail="You already have an exercise with this name.",
             )
 
-    if "muscle_region_id" in updates and updates["muscle_region_id"] is not None:
-        if session.get(MuscleRegion, updates["muscle_region_id"]) is None:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Selected muscle region does not exist.",
-            )
+    muscle_region_ids = updates.pop("muscle_region_ids", None)
+    if muscle_region_ids is not None:
+        for rid in muscle_region_ids:
+            if session.get(MuscleRegion, rid) is None:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=f"Muscle region {rid} does not exist.",
+                )
+        session.exec(
+            delete(ExerciseMuscleRegion).where(ExerciseMuscleRegion.exercise_id == exercise_id)
+        )
+        for rid in muscle_region_ids:
+            session.add(ExerciseMuscleRegion(exercise_id=exercise_id, muscle_region_id=rid))
 
     exercise.sqlmodel_update(updates)
-    return save_and_refresh(session, exercise)
+    exercise = save_and_refresh(session, exercise)
+    final_ids = _get_muscle_region_ids(session, exercise.id)
+    return _exercise_to_read(exercise, final_ids)
 
 
 @router.delete("/{exercise_id}", status_code=status.HTTP_204_NO_CONTENT)

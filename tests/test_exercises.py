@@ -57,7 +57,7 @@ def test_exercise_crud_and_visibility(client):
         client,
         owner_headers,
         name="  Bench Press  ",
-        muscle_region_id=region_id,
+        muscle_region_ids=[region_id],
         execution_notes="  Keep shoulder blades retracted.  ",
     )
     assert create_response.status_code == 201
@@ -218,7 +218,7 @@ def test_exercise_create_update_conflicts_and_invalid_references(client):
         client,
         headers,
         name="Invalid Region Exercise",
-        muscle_region_id=99999,
+        muscle_region_ids=[99999],
     )
     assert invalid_region_create.status_code == 400
 
@@ -237,7 +237,7 @@ def test_exercise_create_update_conflicts_and_invalid_references(client):
 
     invalid_region_update = client.patch(
         f"/api/v1/exercises/{second_id}",
-        json={"muscle_region_id": 99999},
+        json={"muscle_region_ids": [99999]},
         headers=headers,
     )
     assert invalid_region_update.status_code == 400
@@ -319,3 +319,69 @@ def test_alternative_permissions_for_non_owner(client):
         headers=other_headers,
     )
     assert remove_by_other.status_code == 403
+
+
+def test_exercise_multiple_muscle_regions(client):
+    assert register_user(client, email="owner@example.com", name="Owner").status_code == 201
+    headers = auth_headers(client, email="owner@example.com")
+
+    group = client.post(
+        "/api/v1/exercises/muscle-groups/",
+        json={"name": "Chest"},
+        headers=headers,
+    )
+    assert group.status_code == 201
+    group_id = group.json()["id"]
+
+    region1 = client.post(
+        "/api/v1/exercises/muscle-regions/",
+        json={"name": "Upper Chest", "group_id": group_id},
+        headers=headers,
+    )
+    assert region1.status_code == 201
+    region1_id = region1.json()["id"]
+
+    region2 = client.post(
+        "/api/v1/exercises/muscle-regions/",
+        json={"name": "Lower Chest", "group_id": group_id},
+        headers=headers,
+    )
+    assert region2.status_code == 201
+    region2_id = region2.json()["id"]
+
+    create_response = create_exercise(
+        client,
+        headers,
+        name="Incline Press",
+        muscle_region_ids=[region1_id, region2_id],
+    )
+    assert create_response.status_code == 201
+    data = create_response.json()
+    assert set(data["muscle_region_ids"]) == {region1_id, region2_id}
+
+    exercise_id = data["id"]
+    read_response = client.get(f"/api/v1/exercises/{exercise_id}", headers=headers)
+    assert read_response.status_code == 200
+    assert set(read_response.json()["muscle_region_ids"]) == {region1_id, region2_id}
+
+    list_response = client.get("/api/v1/exercises/", headers=headers)
+    assert list_response.status_code == 200
+    listed = [e for e in list_response.json() if e["id"] == exercise_id]
+    assert len(listed) == 1
+    assert set(listed[0]["muscle_region_ids"]) == {region1_id, region2_id}
+
+    patch_response = client.patch(
+        f"/api/v1/exercises/{exercise_id}",
+        json={"muscle_region_ids": [region1_id]},
+        headers=headers,
+    )
+    assert patch_response.status_code == 200
+    assert patch_response.json()["muscle_region_ids"] == [region1_id]
+
+    clear_response = client.patch(
+        f"/api/v1/exercises/{exercise_id}",
+        json={"muscle_region_ids": []},
+        headers=headers,
+    )
+    assert clear_response.status_code == 200
+    assert clear_response.json()["muscle_region_ids"] == []
