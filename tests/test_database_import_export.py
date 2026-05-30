@@ -50,8 +50,8 @@ def test_import_table_from_csv(client):
     assert register_user(client).status_code == 201
     headers = auth_headers(client)
     csv_payload = (
-        "id,name,muscle_region_id,laterality,created_by_user_id,is_public,execution_notes\n"
-        "10,Imported Row,,unilateral,,true,Keep elbows tucked\n"
+        "id,name,laterality,created_by_user_id,is_public,execution_notes\n"
+        "10,Imported Row,unilateral,,true,Keep elbows tucked\n"
     )
 
     response = client.post(

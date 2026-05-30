@@ -26,11 +26,20 @@ Table user_settings {
 Table exercises {
   id integer [pk, increment]
   name varchar [not null]
-  muscle_region_id integer [ref: > muscleRegions.id]
   laterality laterality [not null, default: 'bilateral']
   created_by_user_id integer [ref: > users.id, null]
   is_public boolean [not null, default: false]
   execution_notes text
+}
+
+Table exercise_muscle_regions {
+  exercise_id integer [ref: > exercises.id]
+  muscle_region_id integer [ref: > muscleRegions.id]
+  target_type varchar [not null, default: 'primary']
+
+  indexes {
+    (exercise_id, muscle_region_id) [pk]
+  }
 }
 
 Table exercise_alternatives {

@@ -20,6 +20,16 @@ class MuscleGroup(SQLModel, table=True):
     regions: List["MuscleRegion"] = Relationship(back_populates="group")
 
 
+class ExerciseMuscleRegion(SQLModel, table=True):
+    __tablename__ = "exercise_muscle_regions"
+
+    exercise_id: int = Field(foreign_key="exercises.id", primary_key=True)
+    muscle_region_id: int = Field(foreign_key="muscleRegions.id", primary_key=True)
+    target_type: str = Field(default="primary")
+
+    exercise: Optional["Exercise"] = Relationship(back_populates="muscle_regions")
+
+
 class MuscleRegion(SQLModel, table=True):
     __tablename__ = "muscleRegions"
 
@@ -28,7 +38,6 @@ class MuscleRegion(SQLModel, table=True):
     group_id: int | None = Field(default=None, foreign_key="muscleGroups.id", index=True)
 
     group: Optional["MuscleGroup"] = Relationship(back_populates="regions")
-    exercises: List["Exercise"] = Relationship(back_populates="muscle_region")
 
     __table_args__: tuple = (
         UniqueConstraint("name", "group_id", name="uq_muscle_region_name_per_group"),
@@ -37,7 +46,6 @@ class MuscleRegion(SQLModel, table=True):
 
 class ExerciseBase(SQLModel):
     name: str = Field(index=True)
-    muscle_region_id: int | None = Field(default=None, foreign_key="muscleRegions.id", index=True)
     laterality: Laterality = Field(default=Laterality.bilateral)
     created_by_user_id: int | None = Field(default=None, foreign_key="users.id", index=True)
     is_public: bool = Field(default=False, index=True)
@@ -65,7 +73,7 @@ class Exercise(ExerciseBase, table=True):
 
     id: Optional[int] = Field(default=None, primary_key=True)
 
-    muscle_region: Optional["MuscleRegion"] = Relationship(back_populates="exercises")
+    muscle_regions: List["ExerciseMuscleRegion"] = Relationship(back_populates="exercise", cascade_delete=True)
     template_exercises: List["TemplateExercise"] = Relationship(back_populates="exercise")
     session_sets: List["SessionSet"] = Relationship(back_populates="exercise")
 
@@ -82,16 +90,17 @@ class ExerciseAlternative(SQLModel, table=True):
 
 
 class ExerciseCreate(ExerciseBase):
-    pass
+    muscle_region_ids: list[int] = []
 
 
 class ExerciseRead(ExerciseBase):
     id: int
+    muscle_region_ids: list[int] = []
 
 
 class ExerciseUpdate(SQLModel):
     name: str | None = None
-    muscle_region_id: int | None = None
+    muscle_region_ids: list[int] | None = None
     laterality: Laterality | None = None
     is_public: bool | None = None
     execution_notes: str | None = None
