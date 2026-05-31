@@ -89,18 +89,27 @@ class ExerciseAlternative(SQLModel, table=True):
     alternative_id: int = Field(foreign_key="exercises.id", primary_key=True, index=True)
 
 
+class MuscleRegionInfo(SQLModel):
+    id: int
+    name: str
+    target_type: str
+
+
 class ExerciseCreate(ExerciseBase):
     muscle_region_ids: list[int] = []
+    muscle_region_id: int | None = None
 
 
 class ExerciseRead(ExerciseBase):
     id: int
     muscle_region_ids: list[int] = []
+    muscles: list[MuscleRegionInfo] = []
 
 
 class ExerciseUpdate(SQLModel):
     name: str | None = None
     muscle_region_ids: list[int] | None = None
+    muscle_region_id: int | None = None
     laterality: Laterality | None = None
     is_public: bool | None = None
     execution_notes: str | None = None

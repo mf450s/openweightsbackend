@@ -385,3 +385,169 @@ def test_exercise_multiple_muscle_regions(client):
     )
     assert clear_response.status_code == 200
     assert clear_response.json()["muscle_region_ids"] == []
+
+
+def test_exercise_filter_by_muscle_region_id(client):
+    assert register_user(client, email="owner@example.com", name="Owner").status_code == 201
+    headers = auth_headers(client, email="owner@example.com")
+
+    group = client.post(
+        "/api/v1/exercises/muscle-groups/",
+        json={"name": "Chest"},
+        headers=headers,
+    )
+    assert group.status_code == 201
+    group_id = group.json()["id"]
+
+    r1 = client.post(
+        "/api/v1/exercises/muscle-regions/",
+        json={"name": "Upper", "group_id": group_id},
+        headers=headers,
+    )
+    assert r1.status_code == 201
+    r1_id = r1.json()["id"]
+
+    r2 = client.post(
+        "/api/v1/exercises/muscle-regions/",
+        json={"name": "Lower", "group_id": group_id},
+        headers=headers,
+    )
+    assert r2.status_code == 201
+    r2_id = r2.json()["id"]
+
+    e1 = create_exercise(client, headers, name="Incline", muscle_region_ids=[r1_id])
+    assert e1.status_code == 201
+    e1_id = e1.json()["id"]
+
+    e2 = create_exercise(client, headers, name="Decline", muscle_region_ids=[r2_id])
+    assert e2.status_code == 201
+    e2_id = e2.json()["id"]
+
+    filter_r1 = client.get(f"/api/v1/exercises/?muscle_region_id={r1_id}", headers=headers)
+    assert filter_r1.status_code == 200
+    ids = [e["id"] for e in filter_r1.json()]
+    assert e1_id in ids
+    assert e2_id not in ids
+
+    filter_r2 = client.get(f"/api/v1/exercises/?muscle_region_id={r2_id}", headers=headers)
+    assert filter_r2.status_code == 200
+    ids = [e["id"] for e in filter_r2.json()]
+    assert e2_id in ids
+    assert e1_id not in ids
+
+
+def test_exercise_response_includes_muscles_array(client):
+    assert register_user(client, email="owner@example.com", name="Owner").status_code == 201
+    headers = auth_headers(client, email="owner@example.com")
+
+    group = client.post(
+        "/api/v1/exercises/muscle-groups/",
+        json={"name": "Chest"},
+        headers=headers,
+    )
+    assert group.status_code == 201
+    group_id = group.json()["id"]
+
+    r1 = client.post(
+        "/api/v1/exercises/muscle-regions/",
+        json={"name": "Upper Chest", "group_id": group_id},
+        headers=headers,
+    )
+    assert r1.status_code == 201
+    r1_id = r1.json()["id"]
+    r1_name = r1.json()["name"]
+
+    r2 = client.post(
+        "/api/v1/exercises/muscle-regions/",
+        json={"name": "Lower Chest", "group_id": group_id},
+        headers=headers,
+    )
+    assert r2.status_code == 201
+    r2_id = r2.json()["id"]
+    r2_name = r2.json()["name"]
+
+    create_response = create_exercise(
+        client,
+        headers,
+        name="Flat Press",
+        muscle_region_ids=[r1_id, r2_id],
+    )
+    assert create_response.status_code == 201
+    data = create_response.json()
+    assert "muscles" in data
+    muscles = data["muscles"]
+    assert len(muscles) == 2
+    muscle_ids = {m["id"] for m in muscles}
+    muscle_names = {m["name"] for m in muscles}
+    target_types = {m["target_type"] for m in muscles}
+    assert muscle_ids == {r1_id, r2_id}
+    assert muscle_names == {r1_name, r2_name}
+    assert target_types == {"primary"}
+
+
+def test_legacy_muscle_region_id_accepted(client):
+    assert register_user(client, email="owner@example.com", name="Owner").status_code == 201
+    headers = auth_headers(client, email="owner@example.com")
+
+    group = client.post(
+        "/api/v1/exercises/muscle-groups/",
+        json={"name": "Legs"},
+        headers=headers,
+    )
+    assert group.status_code == 201
+    group_id = group.json()["id"]
+
+    region = client.post(
+        "/api/v1/exercises/muscle-regions/",
+        json={"name": "Quads", "group_id": group_id},
+        headers=headers,
+    )
+    assert region.status_code == 201
+    region_id = region.json()["id"]
+
+    create_response = client.post(
+        "/api/v1/exercises/",
+        json={
+            "name": "Squat",
+            "laterality": "bilateral",
+            "is_public": False,
+            "muscle_region_id": region_id,
+        },
+        headers=headers,
+    )
+    assert create_response.status_code == 201
+    data = create_response.json()
+    assert region_id in data["muscle_region_ids"]
+
+
+def test_exercise_deduplicate_muscle_region_ids(client):
+    assert register_user(client, email="owner@example.com", name="Owner").status_code == 201
+    headers = auth_headers(client, email="owner@example.com")
+
+    group = client.post(
+        "/api/v1/exercises/muscle-groups/",
+        json={"name": "Back"},
+        headers=headers,
+    )
+    assert group.status_code == 201
+    group_id = group.json()["id"]
+
+    region = client.post(
+        "/api/v1/exercises/muscle-regions/",
+        json={"name": "Lats", "group_id": group_id},
+        headers=headers,
+    )
+    assert region.status_code == 201
+    region_id = region.json()["id"]
+
+    create_response = create_exercise(
+        client,
+        headers,
+        name="Pull Up",
+        muscle_region_ids=[region_id, region_id, region_id],
+    )
+    assert create_response.status_code == 201
+    data = create_response.json()
+    assert len(data["muscle_region_ids"]) == 1
+    assert data["muscle_region_ids"] == [region_id]
+    assert len(data["muscles"]) == 1
