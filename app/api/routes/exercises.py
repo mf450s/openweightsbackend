@@ -18,6 +18,7 @@ from app.models.exercise import (
     MuscleGroupRead,
     MuscleRegion,
     MuscleRegionCreate,
+    MuscleRegionInfo,
     MuscleRegionRead,
 )
 from app.models.progression import Estimated1RmPoint, ExerciseSessionHistory, ExerciseSetRead
@@ -55,18 +56,20 @@ def _can_modify_exercise(exercise: Exercise, user: User) -> bool:
     return exercise.created_by_user_id == user.id
 
 
-def _get_muscle_region_ids(session: Session, exercise_id: int) -> list[int]:
+def _get_muscle_region_info(session: Session, exercise_id: int) -> list[MuscleRegionInfo]:
     rows = session.exec(
-        select(ExerciseMuscleRegion.muscle_region_id)
+        select(MuscleRegion.id, MuscleRegion.name, ExerciseMuscleRegion.target_type)
+        .join(ExerciseMuscleRegion, ExerciseMuscleRegion.muscle_region_id == MuscleRegion.id)
         .where(ExerciseMuscleRegion.exercise_id == exercise_id)
         .order_by(ExerciseMuscleRegion.muscle_region_id)
     ).all()
-    return list(rows)
+    return [MuscleRegionInfo(id=row.id, name=row.name, target_type=row.target_type) for row in rows]
 
 
 def _exercise_to_read(
-    exercise: Exercise, muscle_region_ids: list[int] | None = None
+    exercise: Exercise, muscles: list[MuscleRegionInfo] | None = None
 ) -> ExerciseRead:
+    muscles = muscles or []
     return ExerciseRead(
         id=exercise.id,
         name=exercise.name,
@@ -74,7 +77,8 @@ def _exercise_to_read(
         created_by_user_id=exercise.created_by_user_id,
         is_public=exercise.is_public,
         execution_notes=exercise.execution_notes,
-        muscle_region_ids=muscle_region_ids or [],
+        muscle_region_ids=[m.id for m in muscles],
+        muscles=muscles,
     )
 
 
@@ -169,30 +173,32 @@ def create_muscle_region(
 @router.get("/", response_model=list[ExerciseRead])
 def list_exercises(
     current_user: User | None = Depends(get_optional_current_user),
+    muscle_region_id: int | None = None,
     limit: int = Query(default=200, ge=1, le=1000),
     offset: int = Query(default=0, ge=0),
     session: Session = Depends(get_session),
 ) -> list[Exercise]:
     if current_user is None:
-        statement = (
-            select(Exercise)
-            .where(Exercise.is_public.is_(True))
-            .order_by(Exercise.name)
-            .offset(offset)
-            .limit(limit)
-        )
+        statement = select(Exercise).where(Exercise.is_public.is_(True))
     else:
-        statement = (
-            select(Exercise)
-            .where(Exercise.is_public.is_(True))
-            .union(select(Exercise).where(Exercise.created_by_user_id == current_user.id))
-            .order_by(Exercise.name)
-            .offset(offset)
-            .limit(limit)
+        statement = select(Exercise).where(
+            or_(
+                Exercise.is_public.is_(True),
+                Exercise.created_by_user_id == current_user.id,
+            )
         )
+    if muscle_region_id is not None:
+        statement = statement.where(
+            Exercise.id.in_(
+                select(ExerciseMuscleRegion.exercise_id).where(
+                    ExerciseMuscleRegion.muscle_region_id == muscle_region_id
+                )
+            )
+        )
+    statement = statement.order_by(Exercise.name).offset(offset).limit(limit)
     exercises = list(session.exec(statement).all())
     return [
-        _exercise_to_read(e, _get_muscle_region_ids(session, e.id))
+        _exercise_to_read(e, _get_muscle_region_info(session, e.id))
         for e in exercises
     ]
 
@@ -208,7 +214,7 @@ def read_exercise(
         exercise_id=exercise_id,
         user_id=current_user.id if current_user is not None else None,
     )
-    return _exercise_to_read(exercise, _get_muscle_region_ids(session, exercise.id))
+    return _exercise_to_read(exercise, _get_muscle_region_info(session, exercise.id))
 
 
 @router.post("/", response_model=ExerciseRead, status_code=status.HTTP_201_CREATED)
@@ -217,7 +223,12 @@ def create_exercise(
     current_user: User = Depends(get_current_user),
     session: Session = Depends(get_session),
 ) -> ExerciseRead:
-    for rid in payload.muscle_region_ids:
+    muscle_region_ids = payload.muscle_region_ids
+    if not muscle_region_ids and payload.muscle_region_id is not None:
+        muscle_region_ids = [payload.muscle_region_id]
+    muscle_region_ids = list(dict.fromkeys(muscle_region_ids))
+
+    for rid in muscle_region_ids:
         if session.get(MuscleRegion, rid) is None:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
@@ -241,11 +252,11 @@ def create_exercise(
     exercise = Exercise.model_validate(payload)
     exercise.created_by_user_id = current_user.id
     exercise = save_and_refresh(session, exercise)
-    for rid in payload.muscle_region_ids:
+    for rid in muscle_region_ids:
         session.add(ExerciseMuscleRegion(exercise_id=exercise.id, muscle_region_id=rid))
     session.commit()
     session.refresh(exercise)
-    return _exercise_to_read(exercise, payload.muscle_region_ids)
+    return _exercise_to_read(exercise, _get_muscle_region_info(session, exercise.id))
 
 
 @router.patch("/{exercise_id}", response_model=ExerciseRead)
@@ -277,7 +288,12 @@ def update_exercise(
             )
 
     muscle_region_ids = updates.pop("muscle_region_ids", None)
+    if muscle_region_ids is None:
+        muscle_region_id = updates.pop("muscle_region_id", None)
+        if muscle_region_id is not None:
+            muscle_region_ids = [muscle_region_id]
     if muscle_region_ids is not None:
+        muscle_region_ids = list(dict.fromkeys(muscle_region_ids))
         for rid in muscle_region_ids:
             if session.get(MuscleRegion, rid) is None:
                 raise HTTPException(
@@ -292,8 +308,7 @@ def update_exercise(
 
     exercise.sqlmodel_update(updates)
     exercise = save_and_refresh(session, exercise)
-    final_ids = _get_muscle_region_ids(session, exercise.id)
-    return _exercise_to_read(exercise, final_ids)
+    return _exercise_to_read(exercise, _get_muscle_region_info(session, exercise.id))
 
 
 @router.delete("/{exercise_id}", status_code=status.HTTP_204_NO_CONTENT)
