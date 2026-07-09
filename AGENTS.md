@@ -1,5 +1,19 @@
 # openweightsbackend
 
+## Command output discipline
+
+Prefix terminal commands with `rtk` whenever possible to reduce noisy output.
+
+Examples:
+- `rtk git status`
+- `rtk git diff`
+- `rtk pytest`
+- `rtk npm test`
+- `rtk pnpm test`
+- `rtk docker ps`
+
+If a command breaks under RTK, rerun it without RTK and mention why. Do not force RTK for unsupported platform-specific toolchains such as Swift/Xcode commands; first verify the tool exists on this machine.
+
 ## Stack
 
 - FastAPI + SQLModel + Alembic + pydantic-settings
