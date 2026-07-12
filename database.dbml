@@ -1,26 +1,73 @@
-Table muscleGroups {
-  id integer [pk, increment]
-  name varchar [not null]
-}
-
-Table muscleRegions {
-  id integer [pk, increment]
-  name varchar [not null]
-  group_id integer [ref: > muscleGroups.id]
-}
-
 Table users {
   id integer [pk, increment]
   name varchar [not null]
   email varchar [not null, unique]
   password_hash varchar [not null]
   created_at timestamp [not null]
+
+  indexes {
+    email [unique]
+  }
 }
 
 Table user_settings {
   user_id integer [pk, ref: > users.id]
-  preferences jsonb [not null, default: '{}']
+  preferences json [not null, default: '{}']
   updated_at timestamp [not null]
+}
+
+Table refresh_tokens {
+  id integer [pk, increment]
+  user_id integer [ref: > users.id, not null]
+  token_hash varchar [not null, unique]
+  family_id varchar [not null]
+  expires_at timestamp [not null]
+  revoked boolean [not null, default: false]
+  created_at timestamp [not null]
+
+  indexes {
+    user_id
+    token_hash [unique]
+    family_id
+  }
+}
+
+Table personal_records {
+  id integer [pk, increment]
+  user_id integer [ref: > users.id, not null]
+  exercise_id integer [ref: > exercises.id, not null]
+  pr_type varchar [not null]
+  value decimal [not null]
+  achieved_at timestamp [not null]
+  session_set_id integer [ref: > session_sets.id, null]
+  created_at timestamp [not null]
+
+  indexes {
+    user_id
+    exercise_id
+    pr_type
+  }
+}
+
+Table muscleGroups {
+  id integer [pk, increment]
+  name varchar [not null]
+
+  indexes {
+    name
+  }
+}
+
+Table muscleRegions {
+  id integer [pk, increment]
+  name varchar [not null]
+  group_id integer [ref: > muscleGroups.id, null]
+
+  indexes {
+    name
+    group_id
+    (name, group_id) [unique, name: uq_muscle_region_name_per_group]
+  }
 }
 
 Table exercises {
@@ -29,7 +76,14 @@ Table exercises {
   laterality laterality [not null, default: 'bilateral']
   created_by_user_id integer [ref: > users.id, null]
   is_public boolean [not null, default: false]
-  execution_notes text
+  execution_notes text [null]
+
+  indexes {
+    name
+    created_by_user_id
+    is_public
+    (name, created_by_user_id) [unique, name: uq_exercise_name_per_user]
+  }
 }
 
 Table exercise_muscle_regions {
@@ -48,60 +102,89 @@ Table exercise_alternatives {
 
   indexes {
     (exercise_id, alternative_id) [pk]
+    alternative_id
   }
 }
 
 Table training_splits {
   id integer [pk, increment]
-  user_id integer [ref: > users.id]
+  user_id integer [ref: > users.id, null]
   name varchar [not null]
-  description text
+  description text [null]
   created_at timestamp [not null]
+
+  indexes {
+    user_id
+  }
 }
 
 Table workout_templates {
   id integer [pk, increment]
-  split_id integer [ref: > training_splits.id]
+  split_id integer [ref: > training_splits.id, null]
   name varchar [not null]
-  order_in_split integer
+  order_in_split integer [null]
+
+  indexes {
+    split_id
+  }
 }
 
 Table template_exercises {
   id integer [pk, increment]
-  template_id integer [ref: > workout_templates.id]
-  exercise_id integer [ref: > exercises.id]
-  sets integer
-  reps integer
-  rir integer
-  order_in_template integer
-  pause_seconds integer // if null, use user's default
-  weight_kg decimal // saved from latest session for auto-filling, can be overridden when performing a session
-  updated_at timestamp
+  template_id integer [ref: > workout_templates.id, null]
+  exercise_id integer [ref: > exercises.id, null]
+  sets integer [null]
+  reps integer [null]
+  rir integer [null]
+  order_in_template integer [null]
+  pause_seconds integer [null]     // if null, use user's default
+  weight_kg decimal [null]         // saved from latest session for auto-fill
+  updated_at timestamp [null]
+
+  indexes {
+    exercise_id
+    template_id
+    (template_id, order_in_template, id) [name: ix_template_exercises_template_order]
+  }
 }
 
 Table workout_sessions {
   id integer [pk, increment]
-  user_id integer [ref: > users.id]
-  template_id integer [ref: > workout_templates.id, null]   
+  user_id integer [ref: > users.id, null]
+  template_id integer [ref: > workout_templates.id, null]
   performed_at timestamp [not null]
-  notes text
-  started_at timestamp
-  ended_at timestamp
+  notes text [null]
+  started_at timestamp [null]
+  ended_at timestamp [null]
   active_session boolean [not null, default: true]
+
+  indexes {
+    user_id
+    template_id
+    performed_at
+    (user_id, performed_at, id) [name: ix_workout_sessions_user_performed]
+  }
 }
 
 Table session_sets {
   id integer [pk, increment]
-  session_id integer [ref: > workout_sessions.id]
-  exercise_id integer [ref: > exercises.id]
+  session_id integer [ref: > workout_sessions.id, null]
+  exercise_id integer [ref: > exercises.id, null]
   template_exercise_id integer [ref: > template_exercises.id, null]
-  session_notes text
+  session_notes text [null]
   set_number integer [not null]
   side side [null]
-  weight_kg decimal
-  reps integer
-  rir integer
+  weight_kg decimal [null]
+  reps integer [null]
+  rir integer [null]
   completed boolean [default: true]
+
+  indexes {
+    exercise_id
+    session_id
+    template_exercise_id
+    (session_id, set_number, id) [name: ix_session_sets_session_set_number]
+  }
 }
 
 Enum laterality {
