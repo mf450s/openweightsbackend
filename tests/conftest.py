@@ -8,6 +8,7 @@ from sqlmodel import Session, SQLModel, create_engine
 
 os.environ["DATABASE_URL"] = "sqlite://"
 
+from app.api.routes.auth import _login_attempts  # noqa: E402
 from app.db.session import get_session  # noqa: E402
 from app.main import app  # noqa: E402
 
@@ -24,6 +25,12 @@ def session_fixture() -> Generator[Session, None, None]:
     with Session(engine) as session:
         yield session
     SQLModel.metadata.drop_all(engine)
+
+
+@pytest.fixture(autouse=True)
+def reset_login_attempts() -> Generator[None, None, None]:
+    _login_attempts.clear()
+    yield
 
 
 @pytest.fixture(name="client")

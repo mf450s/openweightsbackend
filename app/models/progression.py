@@ -37,6 +37,12 @@ class Estimated1RmPoint(SQLModel):
     estimated_1rm: float
 
 
+class OneRmHistoryPoint(SQLModel):
+    session_id: int
+    performed_at: datetime
+    estimated_1rm: float
+
+
 class PersonalRecordEvent(SQLModel):
     pr_type: str
     value: float

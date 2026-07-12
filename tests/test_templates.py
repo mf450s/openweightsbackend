@@ -169,3 +169,173 @@ def test_template_endpoints_validation_and_not_found_cases(client):
         json={"sets": 4},
     )
     assert wrong_template_for_exercise.status_code == 404
+
+
+# ── Template reorder ─────────────────────────────────────────────────────────
+
+
+def create_exercise(client, headers, **overrides):
+    payload = {
+        "name": "Bench Press",
+        "laterality": "bilateral",
+        "is_public": True,
+    }
+    payload.update(overrides)
+    return client.post("/api/v1/exercises/", json=payload, headers=headers)
+
+
+def test_reorder_template_exercises(client):
+    assert register_user(client, email="user@example.com", name="User").status_code == 201
+    headers = auth_headers(client, email="user@example.com")
+
+    exercise = create_exercise(client, headers, name="Press", is_public=True)
+    assert exercise.status_code == 201
+    exercise_id = exercise.json()["id"]
+
+    # Create template
+    template_resp = client.post("/api/v1/templates/", json={"name": "Push Day"})
+    assert template_resp.status_code == 201
+    template_id = template_resp.json()["id"]
+
+    # Add 3 exercises
+    te1 = client.post(
+        f"/api/v1/templates/{template_id}/exercises",
+        json={"exercise_id": exercise_id, "sets": 3, "order_in_template": 1},
+        headers=headers,
+    )
+    te2 = client.post(
+        f"/api/v1/templates/{template_id}/exercises",
+        json={"exercise_id": exercise_id, "sets": 4, "order_in_template": 2},
+        headers=headers,
+    )
+    te3 = client.post(
+        f"/api/v1/templates/{template_id}/exercises",
+        json={"exercise_id": exercise_id, "sets": 5, "order_in_template": 3},
+        headers=headers,
+    )
+    assert te1.status_code == 201
+    assert te2.status_code == 201
+    assert te3.status_code == 201
+    te1_id = te1.json()["id"]
+    te2_id = te2.json()["id"]
+    te3_id = te3.json()["id"]
+
+    # Reorder: [te3, te1, te2]
+    reorder_resp = client.put(
+        f"/api/v1/templates/{template_id}/exercises/reorder",
+        json={"exercise_ids": [te3_id, te1_id, te2_id]},
+    )
+    assert reorder_resp.status_code == 204
+
+    # Verify order
+    exercises_resp = client.get(f"/api/v1/templates/{template_id}/exercises")
+    assert exercises_resp.status_code == 200
+    exercises = exercises_resp.json()
+    assert len(exercises) == 3
+    # Should be ordered by order_in_template, then id
+    order_map = {e["id"]: e["order_in_template"] for e in exercises}
+    assert order_map[te3_id] == 1
+    assert order_map[te1_id] == 2
+    assert order_map[te2_id] == 3
+
+
+def test_reorder_invalid_exercise_id(client):
+    assert register_user(client, email="user@example.com", name="User").status_code == 201
+    headers = auth_headers(client, email="user@example.com")
+
+    exercise = create_exercise(client, headers, name="Press", is_public=True)
+    assert exercise.status_code == 201
+    exercise_id = exercise.json()["id"]
+
+    template_resp = client.post("/api/v1/templates/", json={"name": "Push Day"})
+    assert template_resp.status_code == 201
+    template_id = template_resp.json()["id"]
+
+    te = client.post(
+        f"/api/v1/templates/{template_id}/exercises",
+        json={"exercise_id": exercise_id, "sets": 3, "order_in_template": 1},
+        headers=headers,
+    )
+    assert te.status_code == 201
+
+    # Try reorder with invalid exercise ID
+    reorder_resp = client.put(
+        f"/api/v1/templates/{template_id}/exercises/reorder",
+        json={"exercise_ids": [99999]},
+    )
+    assert reorder_resp.status_code == 404
+
+
+def test_reorder_nonexistent_template(client):
+    reorder_resp = client.put(
+        "/api/v1/templates/99999/exercises/reorder",
+        json={"exercise_ids": [1]},
+    )
+    assert reorder_resp.status_code == 404
+
+
+# ── Template duplicate ───────────────────────────────────────────────────────
+
+
+def test_duplicate_template_deep_copy(client):
+    assert register_user(client, email="user@example.com", name="User").status_code == 201
+    headers = auth_headers(client, email="user@example.com")
+
+    exercise1 = create_exercise(client, headers, name="Bench Press", is_public=True)
+    exercise2 = create_exercise(client, headers, name="Incline Press", is_public=True)
+    assert exercise1.status_code == 201
+    assert exercise2.status_code == 201
+    ex1_id = exercise1.json()["id"]
+    ex2_id = exercise2.json()["id"]
+
+    # Create template
+    template_resp = client.post("/api/v1/templates/", json={"name": "Push Day"})
+    assert template_resp.status_code == 201
+    template_id = template_resp.json()["id"]
+
+    # Add 2 exercises
+    te1 = client.post(
+        f"/api/v1/templates/{template_id}/exercises",
+        json={"exercise_id": ex1_id, "sets": 4, "reps": 8, "order_in_template": 1},
+        headers=headers,
+    )
+    te2 = client.post(
+        f"/api/v1/templates/{template_id}/exercises",
+        json={"exercise_id": ex2_id, "sets": 3, "reps": 10, "order_in_template": 2},
+        headers=headers,
+    )
+    assert te1.status_code == 201
+    assert te2.status_code == 201
+
+    # Duplicate the template
+    dup_resp = client.post(f"/api/v1/templates/{template_id}/duplicate")
+    assert dup_resp.status_code == 201
+    dup = dup_resp.json()
+
+    # Verify name
+    assert dup["name"] == "Push Day (Copy)"
+    assert dup["id"] != template_id
+
+    # Verify exercises were copied
+    original_exercises = client.get(f"/api/v1/templates/{template_id}/exercises")
+    dup_exercises = client.get(f"/api/v1/templates/{dup['id']}/exercises")
+    assert original_exercises.status_code == 200
+    assert dup_exercises.status_code == 200
+
+    orig_items = original_exercises.json()
+    dup_items = dup_exercises.json()
+    assert len(dup_items) == len(orig_items)
+
+    # Verify exercise data matches (different IDs, same content)
+    for orig, dup_te in zip(orig_items, dup_items):
+        assert dup_te["id"] != orig["id"]
+        assert dup_te["exercise_id"] == orig["exercise_id"]
+        assert dup_te["sets"] == orig["sets"]
+        assert dup_te["reps"] == orig["reps"]
+        assert dup_te["order_in_template"] == orig["order_in_template"]
+
+
+def test_duplicate_nonexistent_template(client):
+    response = client.post("/api/v1/templates/99999/duplicate")
+    assert response.status_code == 404
+

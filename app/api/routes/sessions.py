@@ -1,11 +1,19 @@
+from datetime import date, datetime, timedelta, timezone
+
 from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
+from pydantic import BaseModel
+from sqlalchemy import func
 from sqlmodel import Session, select
 
 from app.api.deps import get_current_user
 from app.db.session import get_session
+from app.models.common import utcnow
+from app.models.progression import PersonalRecord
 from app.models.session import (
     SessionSet,
+    SessionSetBulkCreate,
     SessionSetCreate,
+    SessionSetIdsDelete,
     SessionSetRead,
     SessionSetUpdate,
     WorkoutSession,
@@ -96,6 +104,51 @@ def list_sessions(
         .limit(limit)
     )
     return list(session.exec(statement).all())
+
+
+# ── Calendar ────────────────────────────────────────────────────────────────
+
+
+class CalendarDay(BaseModel):
+    day: int  # 1-31
+    sessions: list[WorkoutSessionRead]
+
+
+class CalendarResponse(BaseModel):
+    year: int
+    month: int
+    days: list[CalendarDay]
+
+
+@router.get("/calendar", response_model=CalendarResponse)
+def get_calendar(
+    year: int = Query(..., ge=2020, le=2100),
+    month: int = Query(..., ge=1, le=12),
+    current_user: User = Depends(get_current_user),
+    session: Session = Depends(get_session),
+) -> CalendarResponse:
+    """Return all workout sessions for the given month grouped by day."""
+    statement = (
+        select(WorkoutSession)
+        .where(WorkoutSession.user_id == current_user.id)
+        .where(func.extract("year", WorkoutSession.performed_at) == year)
+        .where(func.extract("month", WorkoutSession.performed_at) == month)
+        .order_by(WorkoutSession.performed_at.asc(), WorkoutSession.id.asc())
+    )
+    sessions_list = list(session.exec(statement).all())
+
+    # Group by day
+    day_map: dict[int, list[WorkoutSession]] = {}
+    for ws in sessions_list:
+        day = ws.performed_at.day
+        day_map.setdefault(day, []).append(ws)
+
+    days = [
+        CalendarDay(day=day, sessions=[WorkoutSessionRead.model_validate(s) for s in day_map[day]])
+        for day in sorted(day_map)
+    ]
+
+    return CalendarResponse(year=year, month=month, days=days)
 
 
 @router.get("/{session_id}", response_model=WorkoutSessionRead)
@@ -265,5 +318,141 @@ def delete_session_set(
     _get_session_or_404(session, session_id, current_user)
     session_set = _get_session_set_or_404(session, session_id, set_id)
     session.delete(session_set)
+    session.commit()
+    return no_content_response()
+
+
+# ── Workout Execution ──────────────────────────────────────────────────
+
+
+@router.post("/{session_id}/start", response_model=WorkoutSessionRead)
+def start_session(
+    session_id: int,
+    current_user: User = Depends(get_current_user),
+    session: Session = Depends(get_session),
+) -> WorkoutSession:
+    """Start a workout session: set started_at=now and active_session=true."""
+    workout_session = _get_session_or_404(session, session_id, current_user)
+    workout_session.started_at = utcnow()
+    workout_session.active_session = True
+    return save_and_refresh(session, workout_session)
+
+
+@router.post("/{session_id}/end")
+def end_session(
+    session_id: int,
+    current_user: User = Depends(get_current_user),
+    session: Session = Depends(get_session),
+) -> dict:
+    """End a workout session: set ended_at=now, active_session=false, return volume & PRs."""
+    workout_session = _get_session_or_404(session, session_id, current_user)
+    workout_session.ended_at = utcnow()
+    workout_session.active_session = False
+    save_and_refresh(session, workout_session)
+
+    session_data = WorkoutSessionRead.model_validate(workout_session).model_dump()
+
+    # Compute total session volume (sum of weight_kg * reps for completed sets)
+    sets_statement = select(SessionSet).where(SessionSet.session_id == session_id)
+    all_sets = list(session.exec(sets_statement).all())
+    total_volume = None
+    volumes = []
+    for s in all_sets:
+        if s.completed and s.weight_kg is not None and s.reps is not None:
+            volumes.append(float(s.weight_kg) * s.reps)
+    if volumes:
+        total_volume = round(sum(volumes), 2)
+    session_data["total_volume"] = total_volume
+
+    # Collect any PRs found during this session
+    set_ids = [s.id for s in all_sets]
+    prs = []
+    if set_ids:
+        pr_statement = select(PersonalRecord).where(
+            PersonalRecord.session_set_id.in_(set_ids)
+        )
+        prs = list(session.exec(pr_statement).all())
+    session_data["personal_records"] = [
+        {"pr_type": pr.pr_type, "value": float(pr.value)} for pr in prs
+    ]
+
+    return session_data
+
+
+@router.post("/{session_id}/sets/bulk")
+def bulk_create_session_sets(
+    session_id: int,
+    payload: SessionSetBulkCreate,
+    current_user: User = Depends(get_current_user),
+    session: Session = Depends(get_session),
+) -> list[dict]:
+    """Create multiple session sets in a single transaction with PR detection."""
+    workout_session = _get_session_or_404(session, session_id, current_user)
+
+    prepared: list[tuple[SessionSet, int]] = []
+    for set_payload in payload.sets:
+        template_exercise = _resolve_template_exercise_for_session_set(
+            session,
+            set_payload.template_exercise_id,
+            workout_session,
+        )
+        if set_payload.exercise_id is None and template_exercise is None:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="exercise_id or template_exercise_id is required for each set.",
+            )
+        exercise_id = set_payload.exercise_id
+        if exercise_id is None and template_exercise is not None:
+            exercise_id = template_exercise.exercise_id
+        _validate_exercise_for_session_set(session, exercise_id, current_user.id)
+
+        session_set = SessionSet.model_validate(set_payload)
+        session_set.session_id = session_id
+        if session_set.exercise_id is None and exercise_id is not None:
+            session_set.exercise_id = exercise_id
+        session.add(session_set)
+        prepared.append((session_set, exercise_id))
+
+    session.commit()
+
+    results = []
+    for session_set, exercise_id in prepared:
+        session.refresh(session_set)
+        set_data = SessionSetRead.model_validate(session_set).model_dump()
+        pr = check_and_create_pr(
+            session,
+            current_user.id,
+            exercise_id,
+            session_set,
+            workout_session.performed_at,
+        )
+        if pr is not None:
+            set_data["personal_record"] = {"pr_type": pr.pr_type, "value": float(pr.value)}
+        results.append(set_data)
+
+    return results
+
+
+@router.post("/{session_id}/sets/bulk/delete", status_code=status.HTTP_204_NO_CONTENT)
+def bulk_delete_session_sets(
+    session_id: int,
+    payload: SessionSetIdsDelete,
+    current_user: User = Depends(get_current_user),
+    session: Session = Depends(get_session),
+) -> Response:
+    """Delete multiple session sets in a single transaction."""
+    _get_session_or_404(session, session_id, current_user)
+    if not payload.set_ids:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="set_ids must not be empty.",
+        )
+    statement = select(SessionSet).where(
+        SessionSet.session_id == session_id,
+        SessionSet.id.in_(payload.set_ids),
+    )
+    sets_to_delete = list(session.exec(statement).all())
+    for s in sets_to_delete:
+        session.delete(s)
     session.commit()
     return no_content_response()

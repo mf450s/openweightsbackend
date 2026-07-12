@@ -126,11 +126,14 @@ def test_exercise_1rm(client):
         headers=headers,
     )
 
-    rm_resp = client.get(f"/api/v1/exercises/{exercise_id}/1rm", headers=headers)
+    rm_resp = client.get(f"/api/v1/exercises/{exercise_id}/1rm-history", headers=headers)
     assert rm_resp.status_code == 200
     data = rm_resp.json()
     assert len(data) == 2
-    assert data[0]["estimated_1rm"] < data[1]["estimated_1rm"]
+    # Verify both sessions have correct 1RM values
+    values = {d["session_id"]: d["estimated_1rm"] for d in data}
+    assert round(values[session1["id"]], 1) == 91.4   # 80kg x 5 = ~91.43
+    assert round(values[session2["id"]], 1) == 96.9   # 90kg x 3 = ~96.92
 
 
 def test_personal_record_on_create(client):

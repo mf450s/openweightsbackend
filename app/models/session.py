@@ -138,3 +138,11 @@ class SessionSetUpdate(SQLModel):
     @classmethod
     def validate_session_notes(cls, value: str | None) -> str | None:
         return _normalize_session_notes(value)
+
+
+class SessionSetBulkCreate(SQLModel):
+    sets: list[SessionSetCreate]
+
+
+class SessionSetIdsDelete(SQLModel):
+    set_ids: list[int]

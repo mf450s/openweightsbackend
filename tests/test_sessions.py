@@ -306,3 +306,306 @@ def test_update_session_and_set_not_found_paths(client):
         headers=headers,
     )
     assert wrong_set_delete.status_code == 404
+
+
+def test_start_session(client):
+    assert register_user(client, email="user@example.com", name="User").status_code == 201
+    headers = auth_headers(client, email="user@example.com")
+
+    create_resp = client.post(
+        "/api/v1/sessions/",
+        json={"performed_at": "2026-01-01T09:00:00Z"},
+        headers=headers,
+    )
+    assert create_resp.status_code == 201
+    session_id = create_resp.json()["id"]
+
+    start_resp = client.post(
+        f"/api/v1/sessions/{session_id}/start",
+        headers=headers,
+    )
+    assert start_resp.status_code == 200
+    data = start_resp.json()
+    assert data["active_session"] is True
+    assert data["started_at"] is not None
+
+
+def test_start_session_404(client):
+    assert register_user(client, email="user@example.com", name="User").status_code == 201
+    headers = auth_headers(client, email="user@example.com")
+
+    resp = client.post("/api/v1/sessions/99999/start", headers=headers)
+    assert resp.status_code == 404
+
+
+def test_start_session_wrong_owner(client):
+    assert register_user(client, email="a@example.com", name="User A").status_code == 201
+    assert register_user(client, email="b@example.com", name="User B").status_code == 201
+    a_headers = auth_headers(client, email="a@example.com")
+    b_headers = auth_headers(client, email="b@example.com")
+
+    create_resp = client.post(
+        "/api/v1/sessions/",
+        json={"performed_at": "2026-01-01T09:00:00Z"},
+        headers=a_headers,
+    )
+    session_id = create_resp.json()["id"]
+
+    resp = client.post(f"/api/v1/sessions/{session_id}/start", headers=b_headers)
+    assert resp.status_code == 404
+
+
+def test_end_session(client):
+    assert register_user(client, email="user@example.com", name="User").status_code == 201
+    headers = auth_headers(client, email="user@example.com")
+
+    exercise = create_exercise(client, headers, name="Bench Press", is_public=True)
+    assert exercise.status_code == 201
+    exercise_id = exercise.json()["id"]
+
+    create_resp = client.post(
+        "/api/v1/sessions/",
+        json={"performed_at": "2026-01-01T09:00:00Z"},
+        headers=headers,
+    )
+    assert create_resp.status_code == 201
+    session_id = create_resp.json()["id"]
+
+    # Add a set so there's volume
+    set_resp = client.post(
+        f"/api/v1/sessions/{session_id}/sets",
+        json={"exercise_id": exercise_id, "set_number": 1, "weight_kg": 80.0, "reps": 8},
+        headers=headers,
+    )
+    assert set_resp.status_code == 201
+
+    end_resp = client.post(f"/api/v1/sessions/{session_id}/end", headers=headers)
+    assert end_resp.status_code == 200
+    data = end_resp.json()
+    assert data["active_session"] is False
+    assert data["ended_at"] is not None
+    assert data["total_volume"] == 640.0  # 80 * 8
+    assert isinstance(data["personal_records"], list)
+
+
+def test_end_session_no_sets(client):
+    assert register_user(client, email="user@example.com", name="User").status_code == 201
+    headers = auth_headers(client, email="user@example.com")
+
+    create_resp = client.post(
+        "/api/v1/sessions/",
+        json={"performed_at": "2026-01-01T09:00:00Z"},
+        headers=headers,
+    )
+    session_id = create_resp.json()["id"]
+
+    end_resp = client.post(f"/api/v1/sessions/{session_id}/end", headers=headers)
+    assert end_resp.status_code == 200
+    data = end_resp.json()
+    assert data["active_session"] is False
+    assert data["total_volume"] is None
+    assert data["personal_records"] == []
+
+
+def test_end_session_404(client):
+    assert register_user(client, email="user@example.com", name="User").status_code == 201
+    headers = auth_headers(client, email="user@example.com")
+
+    resp = client.post("/api/v1/sessions/99999/end", headers=headers)
+    assert resp.status_code == 404
+
+
+def test_bulk_create_session_sets(client):
+    assert register_user(client, email="user@example.com", name="User").status_code == 201
+    headers = auth_headers(client, email="user@example.com")
+
+    exercise = create_exercise(client, headers, name="Bench Press", is_public=True)
+    assert exercise.status_code == 201
+    exercise_id = exercise.json()["id"]
+
+    create_resp = client.post(
+        "/api/v1/sessions/",
+        json={"performed_at": "2026-01-01T09:00:00Z"},
+        headers=headers,
+    )
+    assert create_resp.status_code == 201
+    session_id = create_resp.json()["id"]
+
+    bulk_resp = client.post(
+        f"/api/v1/sessions/{session_id}/sets/bulk",
+        json={
+            "sets": [
+                {"exercise_id": exercise_id, "set_number": 1, "weight_kg": 80.0, "reps": 8},
+                {"exercise_id": exercise_id, "set_number": 2, "weight_kg": 80.0, "reps": 7},
+                {"exercise_id": exercise_id, "set_number": 3, "weight_kg": 75.0, "reps": 9, "rir": 1},
+            ]
+        },
+        headers=headers,
+    )
+    assert bulk_resp.status_code == 200
+    data = bulk_resp.json()
+    assert len(data) == 3
+    assert data[0]["set_number"] == 1
+    assert data[1]["set_number"] == 2
+    assert data[2]["set_number"] == 3
+    assert data[0]["exercise_id"] == exercise_id
+
+    # Verify sets are persisted
+    list_resp = client.get(f"/api/v1/sessions/{session_id}/sets", headers=headers)
+    assert list_resp.status_code == 200
+    assert len(list_resp.json()) == 3
+
+
+def test_bulk_create_session_sets_with_template_exercise(client):
+    assert register_user(client, email="user@example.com", name="User").status_code == 201
+    headers = auth_headers(client, email="user@example.com")
+
+    exercise = create_exercise(client, headers, name="Squat", is_public=True)
+    assert exercise.status_code == 201
+    exercise_id = exercise.json()["id"]
+
+    template_resp = client.post("/api/v1/templates/", json={"name": "Leg Day"})
+    assert template_resp.status_code == 201
+    template_id = template_resp.json()["id"]
+
+    te_resp = client.post(
+        f"/api/v1/templates/{template_id}/exercises",
+        json={"exercise_id": exercise_id, "sets": 3, "reps": 10},
+        headers=headers,
+    )
+    assert te_resp.status_code == 201
+    template_exercise_id = te_resp.json()["id"]
+
+    create_resp = client.post(
+        "/api/v1/sessions/",
+        json={"performed_at": "2026-01-01T09:00:00Z", "template_id": template_id},
+        headers=headers,
+    )
+    assert create_resp.status_code == 201
+    session_id = create_resp.json()["id"]
+
+    bulk_resp = client.post(
+        f"/api/v1/sessions/{session_id}/sets/bulk",
+        json={
+            "sets": [
+                {"template_exercise_id": template_exercise_id, "set_number": 1, "reps": 10},
+                {"template_exercise_id": template_exercise_id, "set_number": 2, "reps": 10},
+            ]
+        },
+        headers=headers,
+    )
+    assert bulk_resp.status_code == 200
+    data = bulk_resp.json()
+    assert len(data) == 2
+    assert data[0]["exercise_id"] == exercise_id
+    assert data[1]["exercise_id"] == exercise_id
+
+
+def test_bulk_create_session_sets_missing_exercise(client):
+    assert register_user(client, email="user@example.com", name="User").status_code == 201
+    headers = auth_headers(client, email="user@example.com")
+
+    create_resp = client.post(
+        "/api/v1/sessions/",
+        json={"performed_at": "2026-01-01T09:00:00Z"},
+        headers=headers,
+    )
+    session_id = create_resp.json()["id"]
+
+    bulk_resp = client.post(
+        f"/api/v1/sessions/{session_id}/sets/bulk",
+        json={"sets": [{"set_number": 1, "reps": 10}]},
+        headers=headers,
+    )
+    assert bulk_resp.status_code == 400
+
+
+def test_bulk_create_session_sets_404(client):
+    assert register_user(client, email="user@example.com", name="User").status_code == 201
+    headers = auth_headers(client, email="user@example.com")
+
+    bulk_resp = client.post(
+        "/api/v1/sessions/99999/sets/bulk",
+        json={"sets": [{"set_number": 1, "exercise_id": 1, "reps": 10}]},
+        headers=headers,
+    )
+    assert bulk_resp.status_code == 404
+
+
+def test_bulk_delete_session_sets(client):
+    assert register_user(client, email="user@example.com", name="User").status_code == 201
+    headers = auth_headers(client, email="user@example.com")
+
+    exercise = create_exercise(client, headers, name="Bench Press", is_public=True)
+    assert exercise.status_code == 201
+    exercise_id = exercise.json()["id"]
+
+    create_resp = client.post(
+        "/api/v1/sessions/",
+        json={"performed_at": "2026-01-01T09:00:00Z"},
+        headers=headers,
+    )
+    assert create_resp.status_code == 201
+    session_id = create_resp.json()["id"]
+
+    # Create 3 sets via bulk
+    bulk_create_resp = client.post(
+        f"/api/v1/sessions/{session_id}/sets/bulk",
+        json={
+            "sets": [
+                {"exercise_id": exercise_id, "set_number": 1, "weight_kg": 80.0, "reps": 8},
+                {"exercise_id": exercise_id, "set_number": 2, "weight_kg": 80.0, "reps": 7},
+                {"exercise_id": exercise_id, "set_number": 3, "weight_kg": 75.0, "reps": 9},
+            ]
+        },
+        headers=headers,
+    )
+    assert bulk_create_resp.status_code == 200
+    created_sets = bulk_create_resp.json()
+    set_ids = [s["id"] for s in created_sets]
+
+    # Delete 2 of them
+    delete_resp = client.post(
+        f"/api/v1/sessions/{session_id}/sets/bulk/delete",
+        json={"set_ids": set_ids[:2]},
+        headers=headers,
+    )
+    assert delete_resp.status_code == 204
+
+    # Verify only 1 remains
+    list_resp = client.get(f"/api/v1/sessions/{session_id}/sets", headers=headers)
+    assert list_resp.status_code == 200
+    remaining = list_resp.json()
+    assert len(remaining) == 1
+    assert remaining[0]["id"] == set_ids[2]
+
+
+def test_bulk_delete_session_sets_empty_ids(client):
+    assert register_user(client, email="user@example.com", name="User").status_code == 201
+    headers = auth_headers(client, email="user@example.com")
+
+    create_resp = client.post(
+        "/api/v1/sessions/",
+        json={"performed_at": "2026-01-01T09:00:00Z"},
+        headers=headers,
+    )
+    session_id = create_resp.json()["id"]
+
+    delete_resp = client.post(
+        f"/api/v1/sessions/{session_id}/sets/bulk/delete",
+        json={"set_ids": []},
+        headers=headers,
+    )
+    assert delete_resp.status_code == 400
+
+
+def test_bulk_delete_session_sets_404(client):
+    assert register_user(client, email="user@example.com", name="User").status_code == 201
+    headers = auth_headers(client, email="user@example.com")
+
+    delete_resp = client.post(
+        "/api/v1/sessions/99999/sets/bulk/delete",
+        json={"set_ids": [1, 2]},
+        headers=headers,
+    )
+    assert delete_resp.status_code == 404

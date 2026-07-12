@@ -21,7 +21,12 @@ from app.models.exercise import (
     MuscleRegionInfo,
     MuscleRegionRead,
 )
-from app.models.progression import Estimated1RmPoint, ExerciseSessionHistory, ExerciseSetRead
+from app.models.progression import (
+    Estimated1RmPoint,
+    ExerciseSessionHistory,
+    ExerciseSetRead,
+    OneRmHistoryPoint,
+)
 from app.models.session import SessionSet, WorkoutSession
 from app.models.template import TemplateExercise
 from app.models.user import User
@@ -173,7 +178,11 @@ def create_muscle_region(
 @router.get("/", response_model=list[ExerciseRead])
 def list_exercises(
     current_user: User | None = Depends(get_optional_current_user),
+    search: str | None = None,
     muscle_region_id: int | None = None,
+    muscle_group_id: int | None = None,
+    laterality: str | None = None,
+    created_by: str | None = None,
     limit: int = Query(default=200, ge=1, le=1000),
     offset: int = Query(default=0, ge=0),
     session: Session = Depends(get_session),
@@ -181,12 +190,26 @@ def list_exercises(
     if current_user is None:
         statement = select(Exercise).where(Exercise.is_public.is_(True))
     else:
-        statement = select(Exercise).where(
-            or_(
-                Exercise.is_public.is_(True),
-                Exercise.created_by_user_id == current_user.id,
+        if created_by == "me":
+            statement = select(Exercise).where(Exercise.created_by_user_id == current_user.id)
+        elif created_by == "public":
+            statement = select(Exercise).where(Exercise.is_public.is_(True))
+        elif created_by == "all":
+            statement = select(Exercise).where(
+                or_(
+                    Exercise.is_public.is_(True),
+                    Exercise.created_by_user_id == current_user.id,
+                )
             )
-        )
+        else:
+            statement = select(Exercise).where(
+                or_(
+                    Exercise.is_public.is_(True),
+                    Exercise.created_by_user_id == current_user.id,
+                )
+            )
+    if search is not None:
+        statement = statement.where(Exercise.name.ilike(f"%{search}%"))
     if muscle_region_id is not None:
         statement = statement.where(
             Exercise.id.in_(
@@ -195,6 +218,16 @@ def list_exercises(
                 )
             )
         )
+    if muscle_group_id is not None:
+        statement = statement.where(
+            Exercise.id.in_(
+                select(ExerciseMuscleRegion.exercise_id)
+                .join(MuscleRegion, ExerciseMuscleRegion.muscle_region_id == MuscleRegion.id)
+                .where(MuscleRegion.group_id == muscle_group_id)
+            )
+        )
+    if laterality is not None:
+        statement = statement.where(Exercise.laterality == laterality)
     statement = statement.order_by(Exercise.name).offset(offset).limit(limit)
     exercises = list(session.exec(statement).all())
     return [
@@ -354,6 +387,8 @@ def delete_exercise(
 def exercise_history(
     exercise_id: int,
     current_user: User = Depends(get_current_user),
+    limit: int = Query(default=50, ge=1, le=500),
+    offset: int = Query(default=0, ge=0),
     session: Session = Depends(get_session),
 ) -> list[dict]:
     get_accessible_exercise_or_404(session, exercise_id, current_user.id)
@@ -366,7 +401,9 @@ def exercise_history(
             WorkoutSession.user_id == current_user.id,
             SessionSet.completed,
         )
-        .order_by(WorkoutSession.performed_at, WorkoutSession.id, SessionSet.set_number)
+        .order_by(WorkoutSession.performed_at.desc(), WorkoutSession.id.desc(), SessionSet.set_number)
+        .offset(offset)
+        .limit(limit)
     ).all()
 
     grouped: dict[int, dict] = {}
@@ -392,23 +429,48 @@ def exercise_history(
     return list(grouped.values())
 
 
-@router.get("/{exercise_id}/1rm", response_model=list[Estimated1RmPoint])
+@router.get("/{exercise_id}/1rm-history", response_model=list[OneRmHistoryPoint])
 def exercise_1rm_history(
     exercise_id: int,
     current_user: User = Depends(get_current_user),
+    limit: int = Query(default=50, ge=1, le=500),
+    offset: int = Query(default=0, ge=0),
     session: Session = Depends(get_session),
 ) -> list[dict]:
     get_accessible_exercise_or_404(session, exercise_id, current_user.id)
 
+    # Get unique session ids ordered by performed_at DESC.
+    # Use a subquery + IN instead of JOIN + DISTINCT to avoid SQLite's
+    # limitation where DISTINCT ignores ORDER BY on unselected columns.
+    subq = select(SessionSet.session_id).where(
+        SessionSet.exercise_id == exercise_id,
+        SessionSet.completed,
+    ).subquery()
+
+    session_id_rows = session.exec(
+        select(WorkoutSession.id)
+        .where(
+            WorkoutSession.id.in_(select(subq.c.session_id)),
+            WorkoutSession.user_id == current_user.id,
+        )
+        .order_by(WorkoutSession.performed_at.desc(), WorkoutSession.id.desc())
+        .offset(offset)
+        .limit(limit)
+    ).all()
+
+    if not session_id_rows:
+        return []
+
+    session_ids = list(session_id_rows)
+
     rows = session.exec(
         select(SessionSet)
-        .join(WorkoutSession)
         .where(
             SessionSet.exercise_id == exercise_id,
-            WorkoutSession.user_id == current_user.id,
+            SessionSet.session_id.in_(session_ids),
             SessionSet.completed,
         )
-        .order_by(WorkoutSession.performed_at, WorkoutSession.id, SessionSet.set_number)
+        .order_by(SessionSet.session_id, SessionSet.set_number)
     ).all()
 
     session_sets: dict[int, list[SessionSet]] = {}
@@ -420,10 +482,17 @@ def exercise_1rm_history(
             session_dates[sid] = session_set.session.performed_at
 
     result = []
-    for sid in sorted(session_sets.keys(), key=lambda sid: session_dates[sid]):
-        best = get_best_1rm_for_session(session_sets[sid])
-        if best is not None:
-            result.append(Estimated1RmPoint(performed_at=session_dates[sid], estimated_1rm=best))
+    for sid in session_ids:
+        if sid in session_sets:
+            best = get_best_1rm_for_session(session_sets[sid])
+            if best is not None:
+                result.append(
+                    OneRmHistoryPoint(
+                        session_id=sid,
+                        performed_at=session_dates[sid],
+                        estimated_1rm=best,
+                    )
+                )
 
     return result
 

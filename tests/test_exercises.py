@@ -551,3 +551,344 @@ def test_exercise_deduplicate_muscle_region_ids(client):
     assert len(data["muscle_region_ids"]) == 1
     assert data["muscle_region_ids"] == [region_id]
     assert len(data["muscles"]) == 1
+
+
+# --- Enhanced search & filter tests ---
+
+def test_exercise_search_by_name(client):
+    assert register_user(client, email="owner@example.com", name="Owner").status_code == 201
+    headers = auth_headers(client, email="owner@example.com")
+
+    create_exercise(client, headers, name="Bench Press", is_public=True)
+    create_exercise(client, headers, name="Incline Bench Press", is_public=True)
+    create_exercise(client, headers, name="Squat", is_public=True)
+
+    resp = client.get("/api/v1/exercises/?search=bench", headers=headers)
+    assert resp.status_code == 200
+    names = [e["name"] for e in resp.json()]
+    assert "Bench Press" in names
+    assert "Incline Bench Press" in names
+    assert "Squat" not in names
+
+    resp = client.get("/api/v1/exercises/?search=SQUAT", headers=headers)
+    assert resp.status_code == 200
+    names = [e["name"] for e in resp.json()]
+    assert "Squat" in names
+
+
+def test_exercise_filter_by_laterality(client):
+    assert register_user(client, email="owner@example.com", name="Owner").status_code == 201
+    headers = auth_headers(client, email="owner@example.com")
+
+    create_exercise(client, headers, name="Bench Press", laterality="bilateral", is_public=True)
+    create_exercise(client, headers, name="Dumbbell Curl", laterality="unilateral", is_public=True)
+
+    resp = client.get("/api/v1/exercises/?laterality=unilateral", headers=headers)
+    assert resp.status_code == 200
+    names = [e["name"] for e in resp.json()]
+    assert "Dumbbell Curl" in names
+    assert "Bench Press" not in names
+
+    resp = client.get("/api/v1/exercises/?laterality=bilateral", headers=headers)
+    assert resp.status_code == 200
+    names = [e["name"] for e in resp.json()]
+    assert "Bench Press" in names
+    assert "Dumbbell Curl" not in names
+
+
+def test_exercise_filter_by_muscle_group(client):
+    assert register_user(client, email="owner@example.com", name="Owner").status_code == 201
+    headers = auth_headers(client, email="owner@example.com")
+
+    group1 = client.post(
+        "/api/v1/exercises/muscle-groups/", json={"name": "Chest"}, headers=headers
+    )
+    assert group1.status_code == 201
+    g1_id = group1.json()["id"]
+
+    group2 = client.post(
+        "/api/v1/exercises/muscle-groups/", json={"name": "Legs"}, headers=headers
+    )
+    assert group2.status_code == 201
+    g2_id = group2.json()["id"]
+
+    r1 = client.post(
+        "/api/v1/exercises/muscle-regions/",
+        json={"name": "Upper Chest", "group_id": g1_id},
+        headers=headers,
+    )
+    assert r1.status_code == 201
+    r1_id = r1.json()["id"]
+
+    r2 = client.post(
+        "/api/v1/exercises/muscle-regions/",
+        json={"name": "Quads", "group_id": g2_id},
+        headers=headers,
+    )
+    assert r2.status_code == 201
+    r2_id = r2.json()["id"]
+
+    create_exercise(client, headers, name="Bench Press", muscle_region_ids=[r1_id], is_public=True)
+    create_exercise(client, headers, name="Squat", muscle_region_ids=[r2_id], is_public=True)
+
+    resp = client.get(f"/api/v1/exercises/?muscle_group_id={g1_id}", headers=headers)
+    assert resp.status_code == 200
+    names = [e["name"] for e in resp.json()]
+    assert "Bench Press" in names
+    assert "Squat" not in names
+
+    resp = client.get(f"/api/v1/exercises/?muscle_group_id={g2_id}", headers=headers)
+    assert resp.status_code == 200
+    names = [e["name"] for e in resp.json()]
+    assert "Squat" in names
+    assert "Bench Press" not in names
+
+
+def test_exercise_filter_by_created_by(client):
+    assert register_user(client, email="owner@example.com", name="Owner").status_code == 201
+    assert register_user(client, email="other@example.com", name="Other").status_code == 201
+    owner_headers = auth_headers(client, email="owner@example.com")
+    other_headers = auth_headers(client, email="other@example.com")
+
+    create_exercise(client, owner_headers, name="Owner Exercise Private", is_public=False)
+    create_exercise(client, owner_headers, name="Owner Exercise Public", is_public=True)
+    create_exercise(client, other_headers, name="Other Exercise Public", is_public=True)
+
+    resp = client.get("/api/v1/exercises/?created_by=me", headers=owner_headers)
+    assert resp.status_code == 200
+    names = [e["name"] for e in resp.json()]
+    assert "Owner Exercise Private" in names
+    assert "Owner Exercise Public" in names
+    assert "Other Exercise Public" not in names
+
+    resp = client.get("/api/v1/exercises/?created_by=public", headers=owner_headers)
+    assert resp.status_code == 200
+    names = [e["name"] for e in resp.json()]
+    assert "Owner Exercise Public" in names
+    assert "Other Exercise Public" in names
+    assert "Owner Exercise Private" not in names
+
+    resp = client.get("/api/v1/exercises/?created_by=all", headers=owner_headers)
+    assert resp.status_code == 200
+    names = [e["name"] for e in resp.json()]
+    assert "Owner Exercise Private" in names
+    assert "Owner Exercise Public" in names
+    assert "Other Exercise Public" in names
+
+
+def test_exercise_search_combined_filters(client):
+    assert register_user(client, email="owner@example.com", name="Owner").status_code == 201
+    headers = auth_headers(client, email="owner@example.com")
+
+    group = client.post(
+        "/api/v1/exercises/muscle-groups/", json={"name": "Chest"}, headers=headers
+    )
+    assert group.status_code == 201
+    gid = group.json()["id"]
+
+    region = client.post(
+        "/api/v1/exercises/muscle-regions/",
+        json={"name": "Upper", "group_id": gid},
+        headers=headers,
+    )
+    assert region.status_code == 201
+    rid = region.json()["id"]
+
+    create_exercise(
+        client, headers, name="Bench Press",
+        laterality="bilateral", muscle_region_ids=[rid], is_public=True,
+    )
+    create_exercise(
+        client, headers, name="Squat",
+        laterality="bilateral", is_public=True,
+    )
+
+    resp = client.get(
+        f"/api/v1/exercises/?search=bench&muscle_group_id={gid}",
+        headers=headers,
+    )
+    assert resp.status_code == 200
+    names = [e["name"] for e in resp.json()]
+    assert "Bench Press" in names
+    assert "Squat" not in names
+
+
+# --- History & 1RM history endpoint tests ---
+
+def test_exercise_history_endpoint(client):
+    assert register_user(client, email="owner@example.com", name="Owner").status_code == 201
+    headers = auth_headers(client, email="owner@example.com")
+
+    # Create an exercise
+    exercise = create_exercise(client, headers, name="Squat", is_public=True)
+    assert exercise.status_code == 201
+    exercise_id = exercise.json()["id"]
+
+    # Create two sessions with sets for this exercise
+    session1 = client.post(
+        "/api/v1/sessions/",
+        json={"performed_at": "2026-01-02T10:00:00Z"},
+        headers=headers,
+    )
+    assert session1.status_code == 201
+    session1_id = session1.json()["id"]
+
+    client.post(
+        f"/api/v1/sessions/{session1_id}/sets",
+        json={"exercise_id": exercise_id, "set_number": 1, "weight_kg": 100, "reps": 5, "completed": True},
+        headers=headers,
+    )
+
+    session2 = client.post(
+        "/api/v1/sessions/",
+        json={"performed_at": "2026-01-01T10:00:00Z"},
+        headers=headers,
+    )
+    assert session2.status_code == 201
+    session2_id = session2.json()["id"]
+
+    client.post(
+        f"/api/v1/sessions/{session2_id}/sets",
+        json={"exercise_id": exercise_id, "set_number": 1, "weight_kg": 90, "reps": 8, "completed": True},
+        headers=headers,
+    )
+
+    # Access without auth should 401
+    resp = client.get(f"/api/v1/exercises/{exercise_id}/history")
+    assert resp.status_code == 401
+
+    # Access with auth should succeed
+    resp = client.get(f"/api/v1/exercises/{exercise_id}/history", headers=headers)
+    assert resp.status_code == 200
+    data = resp.json()
+    assert len(data) == 2
+
+    # Should be ordered by performed_at DESC (session1 first since it's later)
+    assert data[0]["session_id"] == session1_id
+    assert data[1]["session_id"] == session2_id
+
+    # Each entry should have session_id, performed_at, sets
+    for entry in data:
+        assert "session_id" in entry
+        assert "performed_at" in entry
+        assert "sets" in entry
+        assert len(entry["sets"]) == 1
+        assert "set_number" in entry["sets"][0]
+        assert "weight_kg" in entry["sets"][0]
+        assert "reps" in entry["sets"][0]
+
+    # Test pagination
+    resp = client.get(
+        f"/api/v1/exercises/{exercise_id}/history?limit=1&offset=0",
+        headers=headers,
+    )
+    assert resp.status_code == 200
+    assert len(resp.json()) == 1
+    assert resp.json()[0]["session_id"] == session1_id
+
+    resp = client.get(
+        f"/api/v1/exercises/{exercise_id}/history?limit=1&offset=1",
+        headers=headers,
+    )
+    assert resp.status_code == 200
+    assert len(resp.json()) == 1
+    assert resp.json()[0]["session_id"] == session2_id
+
+
+def test_exercise_1rm_history_endpoint(client):
+    assert register_user(client, email="owner@example.com", name="Owner").status_code == 201
+    headers = auth_headers(client, email="owner@example.com")
+
+    # Create an exercise
+    exercise = create_exercise(client, headers, name="Bench Press", is_public=True)
+    assert exercise.status_code == 201
+    exercise_id = exercise.json()["id"]
+
+    # Create two sessions with sets that have weight+reps for 1RM estimation
+    session1 = client.post(
+        "/api/v1/sessions/",
+        json={"performed_at": "2026-01-02T10:00:00Z"},
+        headers=headers,
+    )
+    assert session1.status_code == 201
+    session1_id = session1.json()["id"]
+
+    # 100kg x 5 reps -> 1RM estimate
+    client.post(
+        f"/api/v1/sessions/{session1_id}/sets",
+        json={"exercise_id": exercise_id, "set_number": 1, "weight_kg": 100, "reps": 5, "completed": True},
+        headers=headers,
+    )
+
+    session2 = client.post(
+        "/api/v1/sessions/",
+        json={"performed_at": "2026-01-01T10:00:00Z"},
+        headers=headers,
+    )
+    assert session2.status_code == 201
+    session2_id = session2.json()["id"]
+
+    # 90kg x 8 reps -> different 1RM estimate
+    client.post(
+        f"/api/v1/sessions/{session2_id}/sets",
+        json={"exercise_id": exercise_id, "set_number": 1, "weight_kg": 90, "reps": 8, "completed": True},
+        headers=headers,
+    )
+
+    # Access without auth should 401
+    resp = client.get(f"/api/v1/exercises/{exercise_id}/1rm-history")
+    assert resp.status_code == 401
+
+    # Access with auth should succeed
+    resp = client.get(f"/api/v1/exercises/{exercise_id}/1rm-history", headers=headers)
+    assert resp.status_code == 200
+    data = resp.json()
+    assert len(data) == 2
+
+    # Should be ordered by performed_at DESC
+    assert data[0]["session_id"] == session1_id
+    assert data[1]["session_id"] == session2_id
+
+    # Each entry should have session_id, performed_at, estimated_1rm
+    for entry in data:
+        assert "session_id" in entry
+        assert "performed_at" in entry
+        assert "estimated_1rm" in entry
+        assert isinstance(entry["estimated_1rm"], float)
+
+    # The first entry (session1) should have a higher 1RM than the second
+    assert data[0]["estimated_1rm"] > data[1]["estimated_1rm"]
+
+    # Test pagination
+    resp = client.get(
+        f"/api/v1/exercises/{exercise_id}/1rm-history?limit=1&offset=0",
+        headers=headers,
+    )
+    assert resp.status_code == 200
+    assert len(resp.json()) == 1
+    assert resp.json()[0]["session_id"] == session1_id
+
+
+def test_exercise_history_requires_auth(client):
+    assert register_user(client, email="owner@example.com", name="Owner").status_code == 201
+    headers = auth_headers(client, email="owner@example.com")
+
+    exercise = create_exercise(client, headers, name="Press", is_public=True)
+    exercise_id = exercise.json()["id"]
+
+    resp = client.get(f"/api/v1/exercises/{exercise_id}/history")
+    assert resp.status_code == 401
+
+    resp = client.get(f"/api/v1/exercises/{exercise_id}/1rm-history")
+    assert resp.status_code == 401
+
+
+def test_exercise_history_for_nonexistent_exercise(client):
+    assert register_user(client, email="owner@example.com", name="Owner").status_code == 201
+    headers = auth_headers(client, email="owner@example.com")
+
+    resp = client.get("/api/v1/exercises/99999/history", headers=headers)
+    assert resp.status_code == 404
+
+    resp = client.get("/api/v1/exercises/99999/1rm-history", headers=headers)
+    assert resp.status_code == 404

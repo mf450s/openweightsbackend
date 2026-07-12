@@ -189,7 +189,7 @@ def test_authenticated_user_can_build_and_log_workout_happy_path(client):
     assert history[0]["session_id"] == session_id
     assert [item["set_number"] for item in history[0]["sets"]] == [1, 2]
 
-    estimated_1rm_response = client.get(f"/api/v1/exercises/{bench_id}/1rm", headers=headers)
+    estimated_1rm_response = client.get(f"/api/v1/exercises/{bench_id}/1rm-history", headers=headers)
     assert estimated_1rm_response.status_code == 200
     estimated_1rm = estimated_1rm_response.json()
     assert len(estimated_1rm) == 1

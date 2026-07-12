@@ -1,4 +1,5 @@
 from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
+from pydantic import BaseModel
 from sqlmodel import Session, delete, select
 
 from app.api.deps import get_optional_current_user
@@ -165,3 +166,88 @@ def delete_template_exercise(
     session.delete(template_exercise)
     session.commit()
     return no_content_response()
+
+
+# ── Bulk operations ─────────────────────────────────────────────────────────
+
+
+class ReorderExercisesRequest(BaseModel):
+    exercise_ids: list[int]
+
+
+@router.put("/{template_id}/exercises/reorder", status_code=status.HTTP_204_NO_CONTENT)
+def reorder_template_exercises(
+    template_id: int,
+    payload: ReorderExercisesRequest,
+    session: Session = Depends(get_session),
+) -> Response:
+    """Reorder template exercises by providing exercise IDs in the desired order."""
+    _get_template_or_404(session, template_id)
+
+    # Fetch all existing template exercises for this template
+    statement = (
+        select(TemplateExercise)
+        .where(TemplateExercise.template_id == template_id)
+        .order_by(TemplateExercise.id)
+    )
+    existing = {te.id: te for te in session.exec(statement).all()}
+
+    # Validate all IDs exist and belong to this template
+    for te_id in payload.exercise_ids:
+        if te_id not in existing:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Template exercise {te_id} not found in this template.",
+            )
+
+    # Update order_in_template based on position (1-indexed)
+    for i, te_id in enumerate(payload.exercise_ids, start=1):
+        existing[te_id].order_in_template = i
+
+    session.commit()
+    return no_content_response()
+
+
+@router.post("/{template_id}/duplicate", response_model=WorkoutTemplateRead, status_code=status.HTTP_201_CREATED)
+def duplicate_template(
+    template_id: int,
+    session: Session = Depends(get_session),
+) -> WorkoutTemplate:
+    """Deep-copy a workout template with all its exercises."""
+    original = _get_template_or_404(session, template_id)
+
+    # Create a new template with "(Copy)" suffix
+    new_template = WorkoutTemplate(
+        name=f"{original.name} (Copy)",
+        split_id=original.split_id,
+        order_in_split=original.order_in_split,
+    )
+    session.add(new_template)
+    session.commit()
+    session.refresh(new_template)
+
+    # Copy all template exercises
+    statement = (
+        select(TemplateExercise)
+        .where(TemplateExercise.template_id == template_id)
+        .order_by(TemplateExercise.id)
+    )
+    original_exercises = list(session.exec(statement).all())
+
+    for te in original_exercises:
+        new_te = TemplateExercise(
+            template_id=new_template.id,
+            exercise_id=te.exercise_id,
+            sets=te.sets,
+            reps=te.reps,
+            rir=te.rir,
+            order_in_template=te.order_in_template,
+            pause_seconds=te.pause_seconds,
+            weight_kg=te.weight_kg,
+            updated_at=te.updated_at,
+        )
+        session.add(new_te)
+
+    session.commit()
+    session.refresh(new_template)
+    return new_template

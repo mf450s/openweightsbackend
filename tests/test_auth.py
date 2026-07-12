@@ -12,6 +12,9 @@ def login_user(client, email="max@example.com", password="supersecret"):
     return client.post("/api/v1/auth/login", json={"email": email, "password": password})
 
 
+from app.api.routes.auth import _login_attempts as _reset_login_attempts
+
+
 def test_login_returns_refresh_token(client):
     assert register_user(client).status_code == 201
     response = login_user(client)
@@ -129,3 +132,42 @@ def test_access_token_from_refresh_is_valid(client):
     )
     assert me_resp.status_code == 200
     assert me_resp.json()["email"] == "max@example.com"
+
+
+def test_login_rate_limiting_block_and_reset(client):
+    """Brute-force protection: 5 failed → 401, 6th → 429.
+    Successful login resets the counter for that IP."""
+    assert register_user(client).status_code == 201
+
+    # --- Phase 1: Block after 5 failures ---
+    for i in range(5):
+        resp = login_user(client, password=f"wrong_{i}")
+        assert resp.status_code == 401, f"Attempt {i+1} expected 401, got {resp.status_code}"
+
+    # 6th attempt → 429
+    resp = login_user(client)
+    assert resp.status_code == 429
+    assert "Too many login attempts" in resp.json()["detail"]
+
+    # --- Phase 2: Successful login resets the counter ---
+    # Clear the rate-limit state so we can test reset independently
+    _reset_login_attempts.clear()
+    register_user(client, email="reset_test@example.com", name="Reset Tester")
+
+    # 3 failed attempts (under the limit)
+    for i in range(3):
+        resp = login_user(client, email="reset_test@example.com", password=f"bad_{i}")
+        assert resp.status_code == 401
+
+    # Successful login resets counter
+    resp = login_user(client, email="reset_test@example.com")
+    assert resp.status_code == 200
+
+    # Now we can fail another 5 times
+    for i in range(5):
+        resp = login_user(client, email="reset_test@example.com", password=f"nope_{i}")
+        assert resp.status_code == 401, f"Post-reset attempt {i+1} expected 401, got {resp.status_code}"
+
+    # 6th → 429
+    resp = login_user(client, email="reset_test@example.com", password="last_try")
+    assert resp.status_code == 429

@@ -1,7 +1,7 @@
 import secrets
 from datetime import datetime, timedelta, timezone
 
-from fastapi import APIRouter, Depends, HTTPException, Response, status
+from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 from sqlmodel import Session, select
 
 from app.core.config import get_settings
@@ -26,6 +26,11 @@ from app.services.persistence import save_and_refresh
 
 router = APIRouter()
 
+# Brute-force protection: IP → list of timestamps of failed login attempts
+_login_attempts: dict[str, list[float]] = {}
+_LOGIN_MAX_ATTEMPTS = 5
+_LOGIN_WINDOW_SECONDS = 15 * 60
+
 
 @router.post("/register", response_model=UserRead, status_code=status.HTTP_201_CREATED)
 def register_user(payload: UserCreate, session: Session = Depends(get_session)) -> User:
@@ -45,9 +50,31 @@ def register_user(payload: UserCreate, session: Session = Depends(get_session)) 
 
 
 @router.post("/login", response_model=AuthToken)
-def login_user(payload: LoginRequest, session: Session = Depends(get_session)) -> AuthToken:
+def login_user(
+    payload: LoginRequest,
+    request: Request,
+    session: Session = Depends(get_session),
+) -> AuthToken:
+    client_ip = request.client.host if request.client else "unknown"
+
+    # --- Brute-force check ---
+    now = __import__("time").time()
+    attempts = _login_attempts.get(client_ip, [])
+    # Prune attempts older than the window
+    attempts[:] = [t for t in attempts if now - t < _LOGIN_WINDOW_SECONDS]
+
+    if len(attempts) >= _LOGIN_MAX_ATTEMPTS:
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail="Too many login attempts. Please try again later.",
+        )
+    # --- End brute-force check ---
+
     user = session.exec(select(User).where(User.email == payload.email)).first()
     if user is None or not verify_password(payload.password, user.password_hash):
+        # Record failed attempt
+        attempts.append(now)
+        _login_attempts[client_ip] = attempts
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid email or password.",
@@ -70,6 +97,9 @@ def login_user(payload: LoginRequest, session: Session = Depends(get_session)) -
     )
     session.add(refresh_token)
     session.commit()
+
+    # Successful login resets the counter
+    _login_attempts.pop(client_ip, None)
 
     return AuthToken(
         access_token=create_access_token(user.id),
@@ -149,7 +179,7 @@ def _revoke_all_user_tokens(session: Session, user_id: int) -> None:
     active = session.exec(
         select(RefreshToken).where(
             RefreshToken.user_id == user_id,
-            not RefreshToken.revoked,
+            RefreshToken.revoked == False,
         )
     ).all()
     for t in active:
