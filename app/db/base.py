@@ -1,4 +1,4 @@
-from app.models.exercise import Exercise, ExerciseAlternative, MuscleGroup, MuscleRegion
+from app.models.exercise import Exercise, ExerciseAlternative, ExerciseMuscleRegion, MuscleGroup, MuscleRegion
 from app.models.progression import PersonalRecord
 from app.models.session import SessionSet, WorkoutSession
 from app.models.template import TemplateExercise, TrainingSplit, WorkoutTemplate
