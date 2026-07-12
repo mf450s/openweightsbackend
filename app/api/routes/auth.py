@@ -120,7 +120,8 @@ def refresh_token(payload: RefreshRequest, session: Session = Depends(get_sessio
             detail="Invalid refresh token.",
         )
 
-    if stored.expires_at.replace(tzinfo=timezone.utc) < datetime.now(timezone.utc):
+    expires = stored.expires_at.replace(tzinfo=timezone.utc) if stored.expires_at.tzinfo is None else stored.expires_at
+    if expires < datetime.now(timezone.utc):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Refresh token has expired.",

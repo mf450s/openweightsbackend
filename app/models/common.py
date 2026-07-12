@@ -2,6 +2,7 @@ from datetime import datetime, timezone
 from enum import Enum
 from typing import Any, Generic, TypeVar
 
+from fastapi import Query
 from pydantic import BaseModel
 from sqlalchemy import JSON, Column, Numeric
 from sqlmodel import Field, SQLModel
@@ -14,6 +15,14 @@ class PaginatedResponse(BaseModel, Generic[T]):
     total: int
     limit: int
     offset: int
+
+
+def pagination_params(
+    limit: int = Query(default=100, ge=1, le=500),
+    offset: int = Query(default=0, ge=0),
+) -> tuple[int, int]:
+    """FastAPI dependency that returns (limit, offset) from query parameters."""
+    return (limit, offset)
 
 
 def utcnow() -> datetime:

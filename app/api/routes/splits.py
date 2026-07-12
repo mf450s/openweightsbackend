@@ -1,8 +1,10 @@
 from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
+from sqlalchemy import func
 from sqlmodel import Session, select
 
 from app.api.deps import get_current_user
 from app.db.session import get_session
+from app.models.common import PaginatedResponse
 from app.models.template import (
     TrainingSplit,
     TrainingSplitCreate,
@@ -23,21 +25,19 @@ def _get_split_or_404(session: Session, split_id: int, current_user: User) -> Tr
     return split
 
 
-@router.get("/", response_model=list[TrainingSplitRead])
+@router.get("/", response_model=PaginatedResponse)
 def list_splits(
     current_user: User = Depends(get_current_user),
     limit: int = Query(default=100, ge=1, le=500),
     offset: int = Query(default=0, ge=0),
     session: Session = Depends(get_session),
-) -> list[TrainingSplit]:
-    statement = (
-        select(TrainingSplit)
-        .where(TrainingSplit.user_id == current_user.id)
-        .order_by(TrainingSplit.id)
-        .offset(offset)
-        .limit(limit)
+) -> PaginatedResponse[TrainingSplitRead]:
+    base = select(TrainingSplit).where(TrainingSplit.user_id == current_user.id)
+    total = session.exec(select(func.count()).select_from(base.subquery())).one()
+    items = list(session.exec(base.order_by(TrainingSplit.id).offset(offset).limit(limit)).all())
+    return PaginatedResponse[TrainingSplitRead](
+        items=items, total=total, limit=limit, offset=offset
     )
-    return list(session.exec(statement).all())
 
 
 @router.get("/{split_id}", response_model=TrainingSplitRead)

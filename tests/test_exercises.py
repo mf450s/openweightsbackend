@@ -69,15 +69,15 @@ def test_exercise_crud_and_visibility(client):
 
     public_list = client.get("/api/v1/exercises/")
     assert public_list.status_code == 200
-    assert public_list.json() == []
+    assert public_list.json()["items"] == []
 
     owner_list = client.get("/api/v1/exercises/", headers=owner_headers)
     assert owner_list.status_code == 200
-    assert len(owner_list.json()) == 1
+    assert len(owner_list.json()["items"]) == 1
 
     other_list = client.get("/api/v1/exercises/", headers=other_headers)
     assert other_list.status_code == 200
-    assert other_list.json() == []
+    assert other_list.json()["items"] == []
 
     patch_response = client.patch(
         f"/api/v1/exercises/{exercise_id}",
@@ -89,7 +89,7 @@ def test_exercise_crud_and_visibility(client):
 
     public_list_after = client.get("/api/v1/exercises/")
     assert public_list_after.status_code == 200
-    assert len(public_list_after.json()) == 1
+    assert len(public_list_after.json()["items"]) == 1
 
     read_by_other = client.get(f"/api/v1/exercises/{exercise_id}", headers=other_headers)
     assert read_by_other.status_code == 200
@@ -251,7 +251,7 @@ def test_delete_exercise_blocked_when_used_in_templates_or_sessions(client):
     assert exercise_response.status_code == 201
     exercise_id = exercise_response.json()["id"]
 
-    template_response = client.post("/api/v1/templates/", json={"name": "Pull Day"})
+    template_response = client.post("/api/v1/templates/", json={"name": "Pull Day"}, headers=headers)
     assert template_response.status_code == 201
     template_id = template_response.json()["id"]
 
@@ -266,7 +266,8 @@ def test_delete_exercise_blocked_when_used_in_templates_or_sessions(client):
     assert blocked_by_template.status_code == 409
 
     remove_template_link = client.delete(
-        f"/api/v1/templates/{template_id}/exercises/{template_exercise_response.json()['id']}"
+        f"/api/v1/templates/{template_id}/exercises/{template_exercise_response.json()['id']}",
+        headers=headers,
     )
     assert remove_template_link.status_code == 204
 
@@ -366,7 +367,7 @@ def test_exercise_multiple_muscle_regions(client):
 
     list_response = client.get("/api/v1/exercises/", headers=headers)
     assert list_response.status_code == 200
-    listed = [e for e in list_response.json() if e["id"] == exercise_id]
+    listed = [e for e in list_response.json()["items"] if e["id"] == exercise_id]
     assert len(listed) == 1
     assert set(listed[0]["muscle_region_ids"]) == {region1_id, region2_id}
 
@@ -425,13 +426,13 @@ def test_exercise_filter_by_muscle_region_id(client):
 
     filter_r1 = client.get(f"/api/v1/exercises/?muscle_region_id={r1_id}", headers=headers)
     assert filter_r1.status_code == 200
-    ids = [e["id"] for e in filter_r1.json()]
+    ids = [e["id"] for e in filter_r1.json()["items"]]
     assert e1_id in ids
     assert e2_id not in ids
 
     filter_r2 = client.get(f"/api/v1/exercises/?muscle_region_id={r2_id}", headers=headers)
     assert filter_r2.status_code == 200
-    ids = [e["id"] for e in filter_r2.json()]
+    ids = [e["id"] for e in filter_r2.json()["items"]]
     assert e2_id in ids
     assert e1_id not in ids
 
@@ -565,14 +566,14 @@ def test_exercise_search_by_name(client):
 
     resp = client.get("/api/v1/exercises/?search=bench", headers=headers)
     assert resp.status_code == 200
-    names = [e["name"] for e in resp.json()]
+    names = [e["name"] for e in resp.json()["items"]]
     assert "Bench Press" in names
     assert "Incline Bench Press" in names
     assert "Squat" not in names
 
     resp = client.get("/api/v1/exercises/?search=SQUAT", headers=headers)
     assert resp.status_code == 200
-    names = [e["name"] for e in resp.json()]
+    names = [e["name"] for e in resp.json()["items"]]
     assert "Squat" in names
 
 
@@ -585,13 +586,13 @@ def test_exercise_filter_by_laterality(client):
 
     resp = client.get("/api/v1/exercises/?laterality=unilateral", headers=headers)
     assert resp.status_code == 200
-    names = [e["name"] for e in resp.json()]
+    names = [e["name"] for e in resp.json()["items"]]
     assert "Dumbbell Curl" in names
     assert "Bench Press" not in names
 
     resp = client.get("/api/v1/exercises/?laterality=bilateral", headers=headers)
     assert resp.status_code == 200
-    names = [e["name"] for e in resp.json()]
+    names = [e["name"] for e in resp.json()["items"]]
     assert "Bench Press" in names
     assert "Dumbbell Curl" not in names
 
@@ -633,13 +634,13 @@ def test_exercise_filter_by_muscle_group(client):
 
     resp = client.get(f"/api/v1/exercises/?muscle_group_id={g1_id}", headers=headers)
     assert resp.status_code == 200
-    names = [e["name"] for e in resp.json()]
+    names = [e["name"] for e in resp.json()["items"]]
     assert "Bench Press" in names
     assert "Squat" not in names
 
     resp = client.get(f"/api/v1/exercises/?muscle_group_id={g2_id}", headers=headers)
     assert resp.status_code == 200
-    names = [e["name"] for e in resp.json()]
+    names = [e["name"] for e in resp.json()["items"]]
     assert "Squat" in names
     assert "Bench Press" not in names
 
@@ -656,21 +657,21 @@ def test_exercise_filter_by_created_by(client):
 
     resp = client.get("/api/v1/exercises/?created_by=me", headers=owner_headers)
     assert resp.status_code == 200
-    names = [e["name"] for e in resp.json()]
+    names = [e["name"] for e in resp.json()["items"]]
     assert "Owner Exercise Private" in names
     assert "Owner Exercise Public" in names
     assert "Other Exercise Public" not in names
 
     resp = client.get("/api/v1/exercises/?created_by=public", headers=owner_headers)
     assert resp.status_code == 200
-    names = [e["name"] for e in resp.json()]
+    names = [e["name"] for e in resp.json()["items"]]
     assert "Owner Exercise Public" in names
     assert "Other Exercise Public" in names
     assert "Owner Exercise Private" not in names
 
     resp = client.get("/api/v1/exercises/?created_by=all", headers=owner_headers)
     assert resp.status_code == 200
-    names = [e["name"] for e in resp.json()]
+    names = [e["name"] for e in resp.json()["items"]]
     assert "Owner Exercise Private" in names
     assert "Owner Exercise Public" in names
     assert "Other Exercise Public" in names
@@ -708,7 +709,7 @@ def test_exercise_search_combined_filters(client):
         headers=headers,
     )
     assert resp.status_code == 200
-    names = [e["name"] for e in resp.json()]
+    names = [e["name"] for e in resp.json()["items"]]
     assert "Bench Press" in names
     assert "Squat" not in names
 

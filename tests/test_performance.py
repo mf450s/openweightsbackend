@@ -57,7 +57,7 @@ def test_muscle_group_caching(client):
 
     list_before = client.get("/api/v1/exercises/muscle-groups/")
     assert list_before.status_code == 200
-    assert list_before.json() == []
+    assert list_before.json()["items"] == []
 
     client.post(
         "/api/v1/exercises/muscle-groups/",
@@ -67,7 +67,7 @@ def test_muscle_group_caching(client):
 
     list_after = client.get("/api/v1/exercises/muscle-groups/")
     assert list_after.status_code == 200
-    assert len(list_after.json()) == 1
+    assert len(list_after.json()["items"]) == 1
 
 
 def test_muscle_region_caching(client):
@@ -90,7 +90,7 @@ def test_muscle_region_caching(client):
 
     list_filtered = client.get(f"/api/v1/exercises/muscle-regions/?group_id={group_id}")
     assert list_filtered.status_code == 200
-    assert len(list_filtered.json()) == 1
+    assert len(list_filtered.json()["items"]) == 1
 
 
 def test_exercise_alternatives_union_query(client):
@@ -130,7 +130,7 @@ def test_delete_exercise_blocked_by_both_template_and_session(client):
     assert exercise.status_code == 201
     exercise_id = exercise.json()["id"]
 
-    template = client.post("/api/v1/templates/", json={"name": "Leg Day"}).json()
+    template = client.post("/api/v1/templates/", json={"name": "Leg Day"}, headers=headers).json()
     template_id = template["id"]
     session_resp = client.post(
         "/api/v1/sessions/",
@@ -167,16 +167,16 @@ def test_list_exercises_union_visibility(client):
 
     anon_list = client.get("/api/v1/exercises/")
     assert anon_list.status_code == 200
-    anon_ids = {e["id"] for e in anon_list.json()}
+    anon_ids = {e["id"] for e in anon_list.json()["items"]}
     assert public_id in anon_ids
     assert private_id not in anon_ids
 
     owner_list = client.get("/api/v1/exercises/", headers=headers)
-    owner_ids = {e["id"] for e in owner_list.json()}
+    owner_ids = {e["id"] for e in owner_list.json()["items"]}
     assert public_id in owner_ids
     assert private_id in owner_ids
 
     other_list = client.get("/api/v1/exercises/", headers=other_headers)
-    other_ids = {e["id"] for e in other_list.json()}
+    other_ids = {e["id"] for e in other_list.json()["items"]}
     assert public_id in other_ids
     assert private_id not in other_ids

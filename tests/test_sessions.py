@@ -43,6 +43,7 @@ def test_sessions_crud_and_set_workflow(client):
     template_response = client.post(
         "/api/v1/templates/",
         json={"name": "Push Day"},
+        headers=owner_headers,
     )
     assert template_response.status_code == 201
     template_id = template_response.json()["id"]
@@ -72,12 +73,12 @@ def test_sessions_crud_and_set_workflow(client):
 
     list_owner_sessions = client.get("/api/v1/sessions/", headers=owner_headers)
     assert list_owner_sessions.status_code == 200
-    assert len(list_owner_sessions.json()) == 1
-    assert list_owner_sessions.json()[0]["active_session"] is True
+    assert len(list_owner_sessions.json()["items"]) == 1
+    assert list_owner_sessions.json()["items"][0]["active_session"] is True
 
     list_other_sessions = client.get("/api/v1/sessions/", headers=other_headers)
     assert list_other_sessions.status_code == 200
-    assert list_other_sessions.json() == []
+    assert list_other_sessions.json()["items"] == []
 
     read_by_other = client.get(f"/api/v1/sessions/{session_id}", headers=other_headers)
     assert read_by_other.status_code == 404
@@ -116,7 +117,7 @@ def test_sessions_crud_and_set_workflow(client):
 
     list_sets_response = client.get(f"/api/v1/sessions/{session_id}/sets", headers=owner_headers)
     assert list_sets_response.status_code == 200
-    assert len(list_sets_response.json()) == 1
+    assert len(list_sets_response.json()["items"]) == 1
 
     update_set_response = client.patch(
         f"/api/v1/sessions/{session_id}/sets/{set_id}",
@@ -188,8 +189,8 @@ def test_session_set_template_exercise_validation_paths(client):
     assert exercise.status_code == 201
     exercise_id = exercise.json()["id"]
 
-    template_a = client.post("/api/v1/templates/", json={"name": "Template A"})
-    template_b = client.post("/api/v1/templates/", json={"name": "Template B"})
+    template_a = client.post("/api/v1/templates/", json={"name": "Template A"}, headers=headers)
+    template_b = client.post("/api/v1/templates/", json={"name": "Template B"}, headers=headers)
     assert template_a.status_code == 201
     assert template_b.status_code == 201
     template_a_id = template_a.json()["id"]
@@ -453,7 +454,7 @@ def test_bulk_create_session_sets(client):
     # Verify sets are persisted
     list_resp = client.get(f"/api/v1/sessions/{session_id}/sets", headers=headers)
     assert list_resp.status_code == 200
-    assert len(list_resp.json()) == 3
+    assert len(list_resp.json()["items"]) == 3
 
 
 def test_bulk_create_session_sets_with_template_exercise(client):
@@ -464,7 +465,7 @@ def test_bulk_create_session_sets_with_template_exercise(client):
     assert exercise.status_code == 201
     exercise_id = exercise.json()["id"]
 
-    template_resp = client.post("/api/v1/templates/", json={"name": "Leg Day"})
+    template_resp = client.post("/api/v1/templates/", json={"name": "Leg Day"}, headers=headers)
     assert template_resp.status_code == 201
     template_id = template_resp.json()["id"]
 
@@ -575,7 +576,7 @@ def test_bulk_delete_session_sets(client):
     # Verify only 1 remains
     list_resp = client.get(f"/api/v1/sessions/{session_id}/sets", headers=headers)
     assert list_resp.status_code == 200
-    remaining = list_resp.json()
+    remaining = list_resp.json()["items"]
     assert len(remaining) == 1
     assert remaining[0]["id"] == set_ids[2]
 

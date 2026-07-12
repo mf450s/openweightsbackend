@@ -1,10 +1,11 @@
 from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 from pydantic import BaseModel
+from sqlalchemy import func
 from sqlmodel import Session, delete, select
 
-from app.api.deps import get_optional_current_user
+from app.api.deps import get_current_user, get_optional_current_user
 from app.db.session import get_session
-from app.models.common import utcnow
+from app.models.common import PaginatedResponse, utcnow
 from app.models.template import (
     TemplateExercise,
     TemplateExerciseCreate,
@@ -22,9 +23,11 @@ from app.services.persistence import no_content_response, save_and_refresh
 router = APIRouter()
 
 
-def _get_template_or_404(session: Session, template_id: int) -> WorkoutTemplate:
+def _get_user_template_or_404(
+    session: Session, template_id: int, current_user: User
+) -> WorkoutTemplate:
     template = session.get(WorkoutTemplate, template_id)
-    if template is None:
+    if template is None or template.user_id != current_user.id:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Template not found.")
     return template
 
@@ -41,26 +44,38 @@ def _get_template_exercise_or_404(
     return template_exercise
 
 
-@router.get("/", response_model=list[WorkoutTemplateRead])
+@router.get("/", response_model=PaginatedResponse)
 def list_templates(
+    current_user: User = Depends(get_current_user),
     limit: int = Query(default=100, ge=1, le=500),
     offset: int = Query(default=0, ge=0),
     session: Session = Depends(get_session),
-) -> list[WorkoutTemplate]:
-    statement = select(WorkoutTemplate).order_by(WorkoutTemplate.id).offset(offset).limit(limit)
-    return list(session.exec(statement).all())
+) -> PaginatedResponse[WorkoutTemplateRead]:
+    base = select(WorkoutTemplate).where(WorkoutTemplate.user_id == current_user.id)
+    total = session.exec(select(func.count()).select_from(base.subquery())).one()
+    items = list(session.exec(base.order_by(WorkoutTemplate.id).offset(offset).limit(limit)).all())
+    return PaginatedResponse[WorkoutTemplateRead](
+        items=items, total=total, limit=limit, offset=offset
+    )
 
 
 @router.get("/{template_id}", response_model=WorkoutTemplateRead)
-def read_template(template_id: int, session: Session = Depends(get_session)) -> WorkoutTemplate:
-    return _get_template_or_404(session, template_id)
+def read_template(
+    template_id: int,
+    current_user: User = Depends(get_current_user),
+    session: Session = Depends(get_session),
+) -> WorkoutTemplate:
+    return _get_user_template_or_404(session, template_id, current_user)
 
 
 @router.post("/", response_model=WorkoutTemplateRead, status_code=status.HTTP_201_CREATED)
 def create_template(
-    payload: WorkoutTemplateCreate, session: Session = Depends(get_session)
+    payload: WorkoutTemplateCreate,
+    current_user: User = Depends(get_current_user),
+    session: Session = Depends(get_session),
 ) -> WorkoutTemplate:
     template = WorkoutTemplate.model_validate(payload)
+    template.user_id = current_user.id
     return save_and_refresh(session, template)
 
 
@@ -68,17 +83,22 @@ def create_template(
 def update_template(
     template_id: int,
     payload: WorkoutTemplateUpdate,
+    current_user: User = Depends(get_current_user),
     session: Session = Depends(get_session),
 ) -> WorkoutTemplate:
-    template = _get_template_or_404(session, template_id)
+    template = _get_user_template_or_404(session, template_id, current_user)
     updates = payload.model_dump(exclude_unset=True)
     template.sqlmodel_update(updates)
     return save_and_refresh(session, template)
 
 
 @router.delete("/{template_id}", status_code=status.HTTP_204_NO_CONTENT)
-def delete_template(template_id: int, session: Session = Depends(get_session)) -> Response:
-    template = _get_template_or_404(session, template_id)
+def delete_template(
+    template_id: int,
+    current_user: User = Depends(get_current_user),
+    session: Session = Depends(get_session),
+) -> Response:
+    template = _get_user_template_or_404(session, template_id, current_user)
 
     session.exec(delete(TemplateExercise).where(TemplateExercise.template_id == template.id))
     session.delete(template)
@@ -86,22 +106,26 @@ def delete_template(template_id: int, session: Session = Depends(get_session)) -
     return no_content_response()
 
 
-@router.get("/{template_id}/exercises", response_model=list[TemplateExerciseRead])
+@router.get("/{template_id}/exercises", response_model=PaginatedResponse)
 def list_template_exercises(
     template_id: int,
+    current_user: User = Depends(get_current_user),
     limit: int = Query(default=200, ge=1, le=1000),
     offset: int = Query(default=0, ge=0),
     session: Session = Depends(get_session),
-) -> list[TemplateExercise]:
-    _get_template_or_404(session, template_id)
-    statement = (
-        select(TemplateExercise)
-        .where(TemplateExercise.template_id == template_id)
-        .order_by(TemplateExercise.order_in_template, TemplateExercise.id)
-        .offset(offset)
-        .limit(limit)
+) -> PaginatedResponse[TemplateExerciseRead]:
+    _get_user_template_or_404(session, template_id, current_user)
+    base = select(TemplateExercise).where(TemplateExercise.template_id == template_id)
+    total = session.exec(select(func.count()).select_from(base.subquery())).one()
+    items = list(
+        session.exec(
+            base.order_by(TemplateExercise.order_in_template, TemplateExercise.id)
+            .offset(offset).limit(limit)
+        ).all()
     )
-    return list(session.exec(statement).all())
+    return PaginatedResponse[TemplateExerciseRead](
+        items=items, total=total, limit=limit, offset=offset
+    )
 
 
 @router.post(
@@ -112,14 +136,14 @@ def list_template_exercises(
 def add_template_exercise(
     template_id: int,
     payload: TemplateExerciseCreate,
-    current_user: User | None = Depends(get_optional_current_user),
+    current_user: User = Depends(get_current_user),
     session: Session = Depends(get_session),
 ) -> TemplateExercise:
-    _get_template_or_404(session, template_id)
+    _get_user_template_or_404(session, template_id, current_user)
     ensure_accessible_exercise_or_400(
         session=session,
         exercise_id=payload.exercise_id,
-        user_id=current_user.id if current_user is not None else None,
+        user_id=current_user.id,
     )
 
     template_exercise = TemplateExercise.model_validate(payload)
@@ -135,17 +159,21 @@ def update_template_exercise(
     template_id: int,
     template_exercise_id: int,
     payload: TemplateExerciseUpdate,
-    current_user: User | None = Depends(get_optional_current_user),
+    current_user: User = Depends(get_current_user),
     session: Session = Depends(get_session),
 ) -> TemplateExercise:
     template_exercise = _get_template_exercise_or_404(session, template_id, template_exercise_id)
+
+    # Verify template ownership
+    _get_user_template_or_404(session, template_id, current_user)
+
     updates = payload.model_dump(exclude_unset=True)
 
     if "exercise_id" in updates:
         ensure_accessible_exercise_or_400(
             session=session,
             exercise_id=updates["exercise_id"],
-            user_id=current_user.id if current_user is not None else None,
+            user_id=current_user.id,
         )
 
     template_exercise.sqlmodel_update(updates)
@@ -160,9 +188,14 @@ def update_template_exercise(
 def delete_template_exercise(
     template_id: int,
     template_exercise_id: int,
+    current_user: User = Depends(get_current_user),
     session: Session = Depends(get_session),
 ) -> Response:
     template_exercise = _get_template_exercise_or_404(session, template_id, template_exercise_id)
+
+    # Verify template ownership
+    _get_user_template_or_404(session, template_id, current_user)
+
     session.delete(template_exercise)
     session.commit()
     return no_content_response()
@@ -179,10 +212,11 @@ class ReorderExercisesRequest(BaseModel):
 def reorder_template_exercises(
     template_id: int,
     payload: ReorderExercisesRequest,
+    current_user: User = Depends(get_current_user),
     session: Session = Depends(get_session),
 ) -> Response:
     """Reorder template exercises by providing exercise IDs in the desired order."""
-    _get_template_or_404(session, template_id)
+    _get_user_template_or_404(session, template_id, current_user)
 
     # Fetch all existing template exercises for this template
     statement = (
@@ -211,16 +245,18 @@ def reorder_template_exercises(
 @router.post("/{template_id}/duplicate", response_model=WorkoutTemplateRead, status_code=status.HTTP_201_CREATED)
 def duplicate_template(
     template_id: int,
+    current_user: User = Depends(get_current_user),
     session: Session = Depends(get_session),
 ) -> WorkoutTemplate:
     """Deep-copy a workout template with all its exercises."""
-    original = _get_template_or_404(session, template_id)
+    original = _get_user_template_or_404(session, template_id, current_user)
 
     # Create a new template with "(Copy)" suffix
     new_template = WorkoutTemplate(
         name=f"{original.name} (Copy)",
         split_id=original.split_id,
         order_in_split=original.order_in_split,
+        user_id=current_user.id,
     )
     session.add(new_template)
     session.commit()

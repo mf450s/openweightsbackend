@@ -9,7 +9,7 @@ from app.models.common import TimestampedModel, json_dict_field, utcnow
 
 if TYPE_CHECKING:
     from app.models.session import WorkoutSession
-    from app.models.template import TrainingSplit
+    from app.models.template import TrainingSplit, WorkoutTemplate
 
 
 class UserBase(SQLModel):
@@ -42,6 +42,7 @@ class User(UserBase, TimestampedModel, table=True):
     settings: Optional["UserSettings"] = Relationship(back_populates="user")
     training_splits: List["TrainingSplit"] = Relationship(back_populates="user")
     workout_sessions: List["WorkoutSession"] = Relationship(back_populates="user")
+    workout_templates: List["WorkoutTemplate"] = Relationship(back_populates="user")
     refresh_tokens: List["RefreshToken"] = Relationship(back_populates="user")
 
 

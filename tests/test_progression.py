@@ -94,7 +94,7 @@ def test_exercise_history_other_user(client):
     exercise_id = exercise.json()["id"]
 
     history_other = client.get(f"/api/v1/exercises/{exercise_id}/history", headers=other_headers)
-    assert history_other.status_code == 404
+    assert history_other.status_code == 403
 
 
 def test_exercise_1rm(client):

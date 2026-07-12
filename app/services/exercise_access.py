@@ -23,6 +23,19 @@ def get_accessible_exercise_or_404(
     return exercise
 
 
+def get_accessible_exercise_or_403(
+    session: Session,
+    exercise_id: int,
+    user_id: int | None,
+) -> Exercise:
+    exercise = session.get(Exercise, exercise_id)
+    if exercise is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Exercise not found.")
+    if not can_access_exercise(exercise, user_id):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Exercise is private.")
+    return exercise
+
+
 def ensure_accessible_exercise_or_400(
     session: Session,
     exercise_id: int | None,

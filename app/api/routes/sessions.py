@@ -7,7 +7,7 @@ from sqlmodel import Session, select
 
 from app.api.deps import get_current_user
 from app.db.session import get_session
-from app.models.common import utcnow
+from app.models.common import PaginatedResponse, utcnow
 from app.models.progression import PersonalRecord
 from app.models.session import (
     SessionSet,
@@ -89,21 +89,24 @@ def _resolve_template_exercise_for_session_set(
     return template_exercise
 
 
-@router.get("/", response_model=list[WorkoutSessionRead])
+@router.get("/", response_model=PaginatedResponse)
 def list_sessions(
     current_user: User = Depends(get_current_user),
     limit: int = Query(default=100, ge=1, le=500),
     offset: int = Query(default=0, ge=0),
     session: Session = Depends(get_session),
-) -> list[WorkoutSession]:
-    statement = (
-        select(WorkoutSession)
-        .where(WorkoutSession.user_id == current_user.id)
-        .order_by(WorkoutSession.performed_at.desc(), WorkoutSession.id.desc())
-        .offset(offset)
-        .limit(limit)
+) -> PaginatedResponse[WorkoutSessionRead]:
+    base = select(WorkoutSession).where(WorkoutSession.user_id == current_user.id)
+    total = session.exec(select(func.count()).select_from(base.subquery())).one()
+    items = list(
+        session.exec(
+            base.order_by(WorkoutSession.performed_at.desc(), WorkoutSession.id.desc())
+            .offset(offset).limit(limit)
+        ).all()
     )
-    return list(session.exec(statement).all())
+    return PaginatedResponse[WorkoutSessionRead](
+        items=items, total=total, limit=limit, offset=offset
+    )
 
 
 # ── Calendar ────────────────────────────────────────────────────────────────
@@ -199,23 +202,26 @@ def delete_session(
     return no_content_response()
 
 
-@router.get("/{session_id}/sets", response_model=list[SessionSetRead])
+@router.get("/{session_id}/sets", response_model=PaginatedResponse)
 def list_session_sets(
     session_id: int,
     current_user: User = Depends(get_current_user),
     limit: int = Query(default=200, ge=1, le=1000),
     offset: int = Query(default=0, ge=0),
     session: Session = Depends(get_session),
-) -> list[SessionSet]:
+) -> PaginatedResponse[SessionSetRead]:
     _get_session_or_404(session, session_id, current_user)
-    statement = (
-        select(SessionSet)
-        .where(SessionSet.session_id == session_id)
-        .order_by(SessionSet.set_number, SessionSet.id)
-        .offset(offset)
-        .limit(limit)
+    base = select(SessionSet).where(SessionSet.session_id == session_id)
+    total = session.exec(select(func.count()).select_from(base.subquery())).one()
+    items = list(
+        session.exec(
+            base.order_by(SessionSet.set_number, SessionSet.id)
+            .offset(offset).limit(limit)
+        ).all()
     )
-    return list(session.exec(statement).all())
+    return PaginatedResponse[SessionSetRead](
+        items=items, total=total, limit=limit, offset=offset
+    )
 
 
 @router.post(

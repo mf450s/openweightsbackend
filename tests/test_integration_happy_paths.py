@@ -96,6 +96,7 @@ def test_authenticated_user_can_build_and_log_workout_happy_path(client):
     template_response = client.post(
         "/api/v1/templates/",
         json={"name": "Push Day", "split_id": split_id, "order_in_split": 1},
+        headers=headers,
     )
     assert template_response.status_code == 201
     template = template_response.json()
@@ -176,11 +177,11 @@ def test_authenticated_user_can_build_and_log_workout_happy_path(client):
 
     sets_response = client.get(f"/api/v1/sessions/{session_id}/sets", headers=headers)
     assert sets_response.status_code == 200
-    assert [item["set_number"] for item in sets_response.json()] == [1, 2]
+    assert [item["set_number"] for item in sets_response.json()["items"]] == [1, 2]
 
     sessions_response = client.get("/api/v1/sessions/", headers=headers)
     assert sessions_response.status_code == 200
-    assert [item["id"] for item in sessions_response.json()] == [session_id]
+    assert [item["id"] for item in sessions_response.json()["items"]] == [session_id]
 
     history_response = client.get(f"/api/v1/exercises/{bench_id}/history", headers=headers)
     assert history_response.status_code == 200
@@ -214,7 +215,7 @@ def test_training_split_crud_happy_path_and_delete_detaches_templates(client):
 
     list_response = client.get("/api/v1/splits/", headers=headers)
     assert list_response.status_code == 200
-    assert [item["id"] for item in list_response.json()] == [split_id]
+    assert [item["id"] for item in list_response.json()["items"]] == [split_id]
 
     read_response = client.get(f"/api/v1/splits/{split_id}", headers=headers)
     assert read_response.status_code == 200
@@ -232,6 +233,7 @@ def test_training_split_crud_happy_path_and_delete_detaches_templates(client):
     template_response = client.post(
         "/api/v1/templates/",
         json={"name": "Upper A", "split_id": split_id, "order_in_split": 1},
+        headers=headers,
     )
     assert template_response.status_code == 201
     template_id = template_response.json()["id"]
@@ -242,7 +244,7 @@ def test_training_split_crud_happy_path_and_delete_detaches_templates(client):
     read_deleted_response = client.get(f"/api/v1/splits/{split_id}", headers=headers)
     assert read_deleted_response.status_code == 404
 
-    detached_template_response = client.get(f"/api/v1/templates/{template_id}")
+    detached_template_response = client.get(f"/api/v1/templates/{template_id}", headers=headers)
     assert detached_template_response.status_code == 200
     detached_template = detached_template_response.json()
     assert detached_template["split_id"] is None

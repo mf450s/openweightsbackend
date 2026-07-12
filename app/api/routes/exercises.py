@@ -2,10 +2,12 @@ import time
 from datetime import datetime
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
+from sqlalchemy import func
 from sqlmodel import Session, and_, delete, or_, select
 
 from app.api.deps import get_current_user, get_optional_current_user
 from app.db.session import get_session
+from app.models.common import PaginatedResponse
 from app.models.exercise import (
     Exercise,
     ExerciseAlternative,
@@ -30,7 +32,7 @@ from app.models.progression import (
 from app.models.session import SessionSet, WorkoutSession
 from app.models.template import TemplateExercise
 from app.models.user import User
-from app.services.exercise_access import can_access_exercise, get_accessible_exercise_or_404
+from app.services.exercise_access import can_access_exercise, get_accessible_exercise_or_403
 from app.services.persistence import no_content_response, save_and_refresh
 from app.services.progression_service import get_best_1rm_for_session
 
@@ -87,15 +89,21 @@ def _exercise_to_read(
     )
 
 
-@router.get("/muscle-groups/", response_model=list[MuscleGroupRead])
+@router.get("/muscle-groups/", response_model=PaginatedResponse)
 def list_muscle_groups(
     limit: int = Query(default=200, ge=1, le=1000),
     offset: int = Query(default=0, ge=0),
     session: Session = Depends(get_session),
-) -> list[MuscleGroup]:
+) -> PaginatedResponse[MuscleGroupRead]:
     def _query():
-        statement = select(MuscleGroup).order_by(MuscleGroup.name).offset(offset).limit(limit)
-        return list(session.exec(statement).all())
+        base = select(MuscleGroup)
+        total = session.exec(select(func.count()).select_from(base.subquery())).one()
+        items = list(
+            session.exec(base.order_by(MuscleGroup.name).offset(offset).limit(limit)).all()
+        )
+        return PaginatedResponse[MuscleGroupRead](
+            items=items, total=total, limit=limit, offset=offset
+        )
 
     if offset == 0:
         return _cached_query("muscle_groups", _CACHE_TTL, _query)
@@ -121,19 +129,22 @@ def create_muscle_group(
     return result
 
 
-@router.get("/muscle-regions/", response_model=list[MuscleRegionRead])
+@router.get("/muscle-regions/", response_model=PaginatedResponse)
 def list_muscle_regions(
     group_id: int | None = None,
     limit: int = Query(default=500, ge=1, le=2000),
     offset: int = Query(default=0, ge=0),
     session: Session = Depends(get_session),
-) -> list[MuscleRegion]:
+) -> PaginatedResponse[MuscleRegionRead]:
     def _query():
-        statement = select(MuscleRegion)
+        base = select(MuscleRegion)
         if group_id is not None:
-            statement = statement.where(MuscleRegion.group_id == group_id)
-        statement = statement.order_by(MuscleRegion.name).offset(offset).limit(limit)
-        return list(session.exec(statement).all())
+            base = base.where(MuscleRegion.group_id == group_id)
+        total = session.exec(select(func.count()).select_from(base.subquery())).one()
+        items = list(session.exec(base.order_by(MuscleRegion.name).offset(offset).limit(limit)).all())
+        return PaginatedResponse[MuscleRegionRead](
+            items=items, total=total, limit=limit, offset=offset
+        )
 
     cache_key = f"muscle_regions:{group_id}"
     if offset == 0 and group_id is not None:
@@ -175,7 +186,7 @@ def create_muscle_region(
     return result
 
 
-@router.get("/", response_model=list[ExerciseRead])
+@router.get("/", response_model=PaginatedResponse)
 def list_exercises(
     current_user: User | None = Depends(get_optional_current_user),
     search: str | None = None,
@@ -186,32 +197,32 @@ def list_exercises(
     limit: int = Query(default=200, ge=1, le=1000),
     offset: int = Query(default=0, ge=0),
     session: Session = Depends(get_session),
-) -> list[Exercise]:
+) -> PaginatedResponse[ExerciseRead]:
     if current_user is None:
-        statement = select(Exercise).where(Exercise.is_public.is_(True))
+        base = select(Exercise).where(Exercise.is_public.is_(True))
     else:
         if created_by == "me":
-            statement = select(Exercise).where(Exercise.created_by_user_id == current_user.id)
+            base = select(Exercise).where(Exercise.created_by_user_id == current_user.id)
         elif created_by == "public":
-            statement = select(Exercise).where(Exercise.is_public.is_(True))
+            base = select(Exercise).where(Exercise.is_public.is_(True))
         elif created_by == "all":
-            statement = select(Exercise).where(
+            base = select(Exercise).where(
                 or_(
                     Exercise.is_public.is_(True),
                     Exercise.created_by_user_id == current_user.id,
                 )
             )
         else:
-            statement = select(Exercise).where(
+            base = select(Exercise).where(
                 or_(
                     Exercise.is_public.is_(True),
                     Exercise.created_by_user_id == current_user.id,
                 )
             )
     if search is not None:
-        statement = statement.where(Exercise.name.ilike(f"%{search}%"))
+        base = base.where(Exercise.name.ilike(f"%{search}%"))
     if muscle_region_id is not None:
-        statement = statement.where(
+        base = base.where(
             Exercise.id.in_(
                 select(ExerciseMuscleRegion.exercise_id).where(
                     ExerciseMuscleRegion.muscle_region_id == muscle_region_id
@@ -219,7 +230,7 @@ def list_exercises(
             )
         )
     if muscle_group_id is not None:
-        statement = statement.where(
+        base = base.where(
             Exercise.id.in_(
                 select(ExerciseMuscleRegion.exercise_id)
                 .join(MuscleRegion, ExerciseMuscleRegion.muscle_region_id == MuscleRegion.id)
@@ -227,13 +238,18 @@ def list_exercises(
             )
         )
     if laterality is not None:
-        statement = statement.where(Exercise.laterality == laterality)
-    statement = statement.order_by(Exercise.name).offset(offset).limit(limit)
+        base = base.where(Exercise.laterality == laterality)
+
+    total = session.exec(select(func.count()).select_from(base.subquery())).one()
+    statement = base.order_by(Exercise.name).offset(offset).limit(limit)
     exercises = list(session.exec(statement).all())
-    return [
+    items = [
         _exercise_to_read(e, _get_muscle_region_info(session, e.id))
         for e in exercises
     ]
+    return PaginatedResponse[ExerciseRead](
+        items=items, total=total, limit=limit, offset=offset
+    )
 
 
 @router.get("/{exercise_id}", response_model=ExerciseRead)
@@ -242,7 +258,7 @@ def read_exercise(
     current_user: User | None = Depends(get_optional_current_user),
     session: Session = Depends(get_session),
 ) -> ExerciseRead:
-    exercise = get_accessible_exercise_or_404(
+    exercise = get_accessible_exercise_or_403(
         session=session,
         exercise_id=exercise_id,
         user_id=current_user.id if current_user is not None else None,
@@ -299,7 +315,7 @@ def update_exercise(
     current_user: User = Depends(get_current_user),
     session: Session = Depends(get_session),
 ) -> ExerciseRead:
-    exercise = get_accessible_exercise_or_404(session, exercise_id, current_user.id)
+    exercise = get_accessible_exercise_or_403(session, exercise_id, current_user.id)
     if not _can_modify_exercise(exercise, current_user):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not enough permissions.")
 
@@ -350,7 +366,7 @@ def delete_exercise(
     current_user: User = Depends(get_current_user),
     session: Session = Depends(get_session),
 ) -> Response:
-    exercise = get_accessible_exercise_or_404(session, exercise_id, current_user.id)
+    exercise = get_accessible_exercise_or_403(session, exercise_id, current_user.id)
     if not _can_modify_exercise(exercise, current_user):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not enough permissions.")
 
@@ -391,7 +407,7 @@ def exercise_history(
     offset: int = Query(default=0, ge=0),
     session: Session = Depends(get_session),
 ) -> list[dict]:
-    get_accessible_exercise_or_404(session, exercise_id, current_user.id)
+    get_accessible_exercise_or_403(session, exercise_id, current_user.id)
 
     rows = session.exec(
         select(SessionSet, WorkoutSession)
@@ -437,7 +453,7 @@ def exercise_1rm_history(
     offset: int = Query(default=0, ge=0),
     session: Session = Depends(get_session),
 ) -> list[dict]:
-    get_accessible_exercise_or_404(session, exercise_id, current_user.id)
+    get_accessible_exercise_or_403(session, exercise_id, current_user.id)
 
     # Get unique session ids ordered by performed_at DESC.
     # Use a subquery + IN instead of JOIN + DISTINCT to avoid SQLite's
@@ -503,7 +519,7 @@ def list_exercise_alternatives(
     current_user: User | None = Depends(get_optional_current_user),
     session: Session = Depends(get_session),
 ) -> list[Exercise]:
-    exercise = get_accessible_exercise_or_404(
+    exercise = get_accessible_exercise_or_403(
         session=session,
         exercise_id=exercise_id,
         user_id=current_user.id if current_user is not None else None,
@@ -546,8 +562,8 @@ def add_exercise_alternative(
             detail="An exercise cannot be an alternative to itself.",
         )
 
-    exercise = get_accessible_exercise_or_404(session, exercise_id, current_user.id)
-    alternative = get_accessible_exercise_or_404(session, alternative_id, current_user.id)
+    exercise = get_accessible_exercise_or_403(session, exercise_id, current_user.id)
+    alternative = get_accessible_exercise_or_403(session, alternative_id, current_user.id)
     if not _can_modify_exercise(exercise, current_user):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not enough permissions.")
 
@@ -576,8 +592,8 @@ def remove_exercise_alternative(
     current_user: User = Depends(get_current_user),
     session: Session = Depends(get_session),
 ) -> Response:
-    exercise = get_accessible_exercise_or_404(session, exercise_id, current_user.id)
-    get_accessible_exercise_or_404(session, alternative_id, current_user.id)
+    exercise = get_accessible_exercise_or_403(session, exercise_id, current_user.id)
+    get_accessible_exercise_or_403(session, alternative_id, current_user.id)
     if not _can_modify_exercise(exercise, current_user):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not enough permissions.")
 

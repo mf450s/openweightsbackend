@@ -82,7 +82,9 @@ class WorkoutTemplate(WorkoutTemplateBase, table=True):
     __tablename__ = "workout_templates"
 
     id: int | None = Field(default=None, primary_key=True)
+    user_id: int | None = Field(default=None, foreign_key="users.id", index=True)
 
+    user: "User" = Relationship(back_populates="workout_templates")
     split: "TrainingSplit" = Relationship(back_populates="workout_templates")
     template_exercises: list["TemplateExercise"] = Relationship(back_populates="template")
     workout_sessions: list["WorkoutSession"] = Relationship(back_populates="template")

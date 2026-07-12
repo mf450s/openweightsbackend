@@ -4,7 +4,7 @@ from sqlmodel import Session, select
 from app.api.deps import get_current_user
 from app.core.security import hash_password, verify_password
 from app.db.session import get_session
-from app.models.common import utcnow
+from app.models.common import PaginatedResponse, utcnow
 from app.models.user import (
     User,
     UserDeleteRequest,
@@ -22,9 +22,12 @@ from app.services.user_service import delete_user_related_data
 router = APIRouter()
 
 
-@router.get("/", response_model=list[UserRead])
-def list_users(current_user: User = Depends(get_current_user)) -> list[User]:
-    return [current_user]
+@router.get("/", response_model=PaginatedResponse)
+def list_users(current_user: User = Depends(get_current_user)) -> PaginatedResponse[UserRead]:
+    items = [current_user]
+    return PaginatedResponse[UserRead](
+        items=items, total=1, limit=100, offset=0
+    )
 
 
 @router.get("/me", response_model=UserRead)
