@@ -274,7 +274,7 @@ Basis-Pfad: `/api/v1/exercises`
 
 **Query:** `limit` (default 200, max 1000), `offset` (default 0)
 
-**Response `200` — `list[MuscleGroupRead]`:**
+**Response `200` — `PaginatedResponse[MuscleGroupRead]`:**
 ```json
 [
   { "id": 1, "name": "Chest" }
@@ -306,7 +306,7 @@ Basis-Pfad: `/api/v1/exercises`
 
 **Query:** `group_id` (int, optional), `limit` (default 500, max 2000), `offset` (default 0)
 
-**Response `200` — `list[MuscleRegionRead]`:**
+**Response `200` — `PaginatedResponse[MuscleRegionRead]`:**
 ```json
 [
   { "id": 1, "name": "Upper Chest", "group_id": 1 }
@@ -363,7 +363,7 @@ Basis-Pfad: `/api/v1/exercises`
 - `created_by=public`: nur public
 - `created_by=all`: public + eigene
 
-**Response `200` — `list[ExerciseRead]`:**
+**Response `200` — `PaginatedResponse[ExerciseRead]`:**
 ```json
 [
   {
@@ -544,7 +544,7 @@ Basis-Pfad: `/api/v1/splits` — **alle Endpoints auth-pflichtig**, alle Daten g
 
 **Query:** `limit` (default 100, max 500), `offset` (default 0)
 
-**Response `200` — `list[TrainingSplitRead]`:**
+**Response `200` — `PaginatedResponse[TrainingSplitRead]`:**
 ```json
 [
   {
@@ -597,7 +597,7 @@ Basis-Pfad: `/api/v1/templates`
 
 **Query:** `limit` (default 100, max 500), `offset` (default 0)
 
-**Response `200` — `list[WorkoutTemplateRead]`:**
+**Response `200` — `PaginatedResponse[WorkoutTemplateRead]`:**
 ```json
 [
   {
@@ -630,7 +630,7 @@ Deep-Copy: neues Template mit Name + "(Copy)", kopiert alle `template_exercises`
 
 **Query:** `limit` (default 200, max 1000), `offset` (default 0)
 
-**Response `200` — `list[TemplateExerciseRead]`:**
+**Response `200` — `PaginatedResponse[TemplateExerciseRead]`:**
 ```json
 [
   {
@@ -729,7 +729,7 @@ Basis-Pfad: `/api/v1/sessions` — **alle Endpoints auth-pflichtig**, alle Daten
 
 **Query:** `limit` (default 100, max 500), `offset` (default 0)
 
-**Response `200` — `list[WorkoutSessionRead]`:**
+**Response `200` — `PaginatedResponse[WorkoutSessionRead]`:**
 ```json
 [
   {
@@ -1196,25 +1196,3 @@ Alle `GET 200`-Responses erhalten automatisch `Cache-Control: private, max-age=6
 
 ### GZip
 Automatisch ab 1000 Byte Response-Größe.
-
----
-
-## 5. Offene Fragen / Unklarheiten
-
-1. ~~**Template-Besitz:** Templates haben kein `user_id`-Feld und sind global lesbar/schreibbar.~~ → **Gefixt:** `WorkoutTemplate.user_id` hinzugefügt, alle Endpoints auth-pflichtig + user-scoped.
-
-2. ~~**TrainingSplit.user_id** ist nullable — aktuell wird sie aber immer beim anlegenden User gesetzt. Sollte nie null sein.~~ → **Gefixt:** Spalte ist jetzt NOT NULL.
-
-3. ~~**Pagination-Schema:** `PaginatedResponse` existiert als Shared-Model (mit `total`), wird aber nirgends verwendet.~~ → **Gefixt:** Alle List-Endpoints nutzen `PaginatedResponse` mit `items`, `total`, `limit`, `offset`.
-
-4. ~~**Exercise-Access:** `get_accessible_exercise_or_404` returned immer 404.~~ → **Gefixt:** Neue Funktion `get_accessible_exercise_or_403` — 404 wenn nicht existent, 403 wenn privat/falscher Owner.
-
-5. ~~**Refresh-Token-Expiry Check:** Timezone-naive Datetime-Probleme.~~ → **Gefixt:** Korrekter `tzinfo`-Check vor Vergleich.
-
-6. **Calendar-Endpoint:** Verwendet `func.extract` — funktioniert mit SQLite und PostgreSQL. Sollte stabil laufen.
-
-7. **Delete-Exercise-Check:** Prüft nur, ob eine `TemplateExercise.id` oder `SessionSet.id` existiert, die auf die Übung zeigt — kein vollständiger Lock, aber ausreichend für Konsistenz.
-
-8. ~~**Kein CORS konfiguriert:**~~ → **Gefixt:** `CORSMiddleware` mit `allow_origins=["*"]` aktiviert.
-
-9. **rate-limit brute force:** In-Memory, nicht shared zwischen Replicas. Für Multi-Process-Setups wäre Redis o.ä. nötig.
