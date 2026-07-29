@@ -145,12 +145,37 @@ class MuscleGroupCreate(SQLModel):
         return normalized
 
 
+class MuscleGroupUpdate(SQLModel):
+    name: str
+
+    @field_validator("name")
+    @classmethod
+    def validate_name(cls, value: str) -> str:
+        normalized = value.strip()
+        if len(normalized) < 2:
+            raise ValueError("Muscle group name must be at least 2 characters long.")
+        return normalized
+
+
 class MuscleGroupRead(SQLModel):
     id: int
     name: str
 
 
 class MuscleRegionCreate(SQLModel):
+    name: str
+    group_id: int | None = None
+
+    @field_validator("name")
+    @classmethod
+    def validate_name(cls, value: str) -> str:
+        normalized = value.strip()
+        if len(normalized) < 2:
+            raise ValueError("Muscle region name must be at least 2 characters long.")
+        return normalized
+
+
+class MuscleRegionUpdate(SQLModel):
     name: str
     group_id: int | None = None
 

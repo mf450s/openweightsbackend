@@ -18,10 +18,12 @@ from app.models.exercise import (
     MuscleGroup,
     MuscleGroupCreate,
     MuscleGroupRead,
+    MuscleGroupUpdate,
     MuscleRegion,
     MuscleRegionCreate,
-    MuscleRegionInfo,
     MuscleRegionRead,
+    MuscleRegionUpdate,
+    MuscleRegionInfo,
 )
 from app.models.progression import (
     Estimated1RmPoint,
@@ -129,6 +131,68 @@ def create_muscle_group(
     return result
 
 
+@router.patch("/muscle-groups/{group_id}", response_model=MuscleGroupRead)
+def update_muscle_group(
+    group_id: int,
+    payload: MuscleGroupUpdate,
+    _: User = Depends(get_current_user),
+    session: Session = Depends(get_session),
+) -> MuscleGroup:
+    group = session.get(MuscleGroup, group_id)
+    if group is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Muscle group not found.",
+        )
+
+    existing = session.exec(
+        select(MuscleGroup.id).where(
+            MuscleGroup.name == payload.name, MuscleGroup.id != group_id
+        )
+    ).first()
+    if existing:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="A muscle group with this name already exists.",
+        )
+
+    group.name = payload.name
+    result = save_and_refresh(session, group)
+    _invalidate_cache("muscle_groups")
+    return result
+
+
+@router.delete("/muscle-groups/{group_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_muscle_group(
+    group_id: int,
+    _: User = Depends(get_current_user),
+    session: Session = Depends(get_session),
+) -> Response:
+    group = session.get(MuscleGroup, group_id)
+    if group is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Muscle group not found.",
+        )
+
+    # Check if any regions reference this group
+    region_count = session.exec(
+        select(func.count()).select_from(
+            select(MuscleRegion).where(MuscleRegion.group_id == group_id).subquery()
+        )
+    ).one()
+    if region_count > 0:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=f"Cannot delete group: {region_count} muscle region(s) still reference it.",
+        )
+
+    session.delete(group)
+    session.commit()
+    _invalidate_cache("muscle_groups")
+    return no_content_response()
+
+
 @router.get("/muscle-regions/", response_model=PaginatedResponse)
 def list_muscle_regions(
     group_id: int | None = None,
@@ -184,6 +248,81 @@ def create_muscle_region(
     result = save_and_refresh(session, region)
     _invalidate_cache(f"muscle_regions:{payload.group_id}")
     return result
+
+
+@router.patch("/muscle-regions/{region_id}", response_model=MuscleRegionRead)
+def update_muscle_region(
+    region_id: int,
+    payload: MuscleRegionUpdate,
+    _: User = Depends(get_current_user),
+    session: Session = Depends(get_session),
+) -> MuscleRegion:
+    region = session.get(MuscleRegion, region_id)
+    if region is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Muscle region not found.",
+        )
+
+    if payload.group_id is not None and session.get(MuscleGroup, payload.group_id) is None:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Selected muscle group does not exist.",
+        )
+
+    existing = session.exec(
+        select(MuscleRegion.id).where(
+            and_(
+                MuscleRegion.name == payload.name,
+                MuscleRegion.group_id == payload.group_id,
+                MuscleRegion.id != region_id,
+            )
+        )
+    ).first()
+    if existing:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="A muscle region with this name already exists in this group.",
+        )
+
+    region.name = payload.name
+    region.group_id = payload.group_id
+    result = save_and_refresh(session, region)
+    _invalidate_cache(f"muscle_regions:{payload.group_id}", f"muscle_regions:{region.group_id}")
+    return result
+
+
+@router.delete("/muscle-regions/{region_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_muscle_region(
+    region_id: int,
+    _: User = Depends(get_current_user),
+    session: Session = Depends(get_session),
+) -> Response:
+    region = session.get(MuscleRegion, region_id)
+    if region is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Muscle region not found.",
+        )
+
+    # Check if any exercises reference this region
+    exercise_count = session.exec(
+        select(func.count()).select_from(
+            select(ExerciseMuscleRegion).where(
+                ExerciseMuscleRegion.muscle_region_id == region_id
+            ).subquery()
+        )
+    ).one()
+    if exercise_count > 0:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=f"Cannot delete region: {exercise_count} exercise(s) still reference it.",
+        )
+
+    session.delete(region)
+    session.commit()
+    _invalidate_cache(f"muscle_regions:{region.group_id}")
+    return no_content_response()
 
 
 @router.get("/", response_model=PaginatedResponse)

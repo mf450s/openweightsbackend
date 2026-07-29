@@ -16,7 +16,7 @@ def test_register_login_and_read_current_user(client):
     register_response = register_user(client)
     assert register_response.status_code == 201
     created = register_response.json()
-    assert created["email"] == "max@example.com"
+    assert created["user"]["email"] == "max@example.com"
     assert "password" not in created
     assert "password_hash" not in created
 
