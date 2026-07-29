@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 from datetime import datetime
 from typing import TYPE_CHECKING, List, Optional
 
@@ -76,30 +74,6 @@ class SessionSet(SQLModel, table=True):
     template_exercise: Optional["TemplateExercise"] = Relationship(back_populates="session_sets")
 
 
-class WorkoutSessionCreate(WorkoutSessionBase):
-    user_id: int | None = None
-    sets: list[SessionSetCreate] = Field(default_factory=list)
-
-
-class WorkoutSessionRead(WorkoutSessionBase):
-    id: int
-
-
-class WorkoutSessionUpdate(SQLModel):
-    template_id: int | None = None
-    performed_at: datetime | None = None
-    notes: str | None = None
-    started_at: datetime | None = None
-    ended_at: datetime | None = None
-    active_session: bool | None = None
-    sets: list[SessionSetCreate] | None = None
-
-    @field_validator("notes")
-    @classmethod
-    def validate_notes(cls, value: str | None) -> str | None:
-        return _normalize_notes(value)
-
-
 class SessionSetBase(SQLModel):
     exercise_id: int | None = Field(default=None, foreign_key="exercises.id")
     template_exercise_id: int | None = Field(default=None, foreign_key="template_exercises.id")
@@ -150,3 +124,27 @@ class SessionSetBulkCreate(SQLModel):
 
 class SessionSetIdsDelete(SQLModel):
     set_ids: list[int]
+
+
+class WorkoutSessionCreate(WorkoutSessionBase):
+    user_id: int | None = None
+    sets: list[SessionSetCreate] = Field(default_factory=list)
+
+
+class WorkoutSessionRead(WorkoutSessionBase):
+    id: int
+
+
+class WorkoutSessionUpdate(SQLModel):
+    template_id: int | None = None
+    performed_at: datetime | None = None
+    notes: str | None = None
+    started_at: datetime | None = None
+    ended_at: datetime | None = None
+    active_session: bool | None = None
+    sets: list[SessionSetCreate] | None = None
+
+    @field_validator("notes")
+    @classmethod
+    def validate_notes(cls, value: str | None) -> str | None:
+        return _normalize_notes(value)

@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 from datetime import datetime
 from typing import TYPE_CHECKING
 
@@ -115,6 +113,26 @@ class TemplateExercise(TemplateExerciseBase, table=True):
     session_sets: list["SessionSet"] = Relationship(back_populates="template_exercise")
 
 
+class TemplateExerciseCreate(TemplateExerciseBase):
+    pass
+
+
+class TemplateExerciseRead(TemplateExerciseBase):
+    id: int
+    template_id: int | None = None
+    updated_at: datetime | None = None
+
+
+class TemplateExerciseUpdate(SQLModel):
+    exercise_id: int | None = None
+    sets: int | None = None
+    reps: int | None = None
+    rir: int | None = None
+    order_in_template: int | None = None
+    pause_seconds: int | None = None
+    weight_kg: float | None = None
+
+
 class WorkoutTemplateCreate(WorkoutTemplateBase):
     exercises: list[TemplateExerciseCreate] = Field(default_factory=list)
 
@@ -136,23 +154,3 @@ class WorkoutTemplateUpdate(SQLModel):
         if value is None:
             return value
         return _normalize_template_name(value)
-
-
-class TemplateExerciseCreate(TemplateExerciseBase):
-    pass
-
-
-class TemplateExerciseRead(TemplateExerciseBase):
-    id: int
-    template_id: int | None = None
-    updated_at: datetime | None = None
-
-
-class TemplateExerciseUpdate(SQLModel):
-    exercise_id: int | None = None
-    sets: int | None = None
-    reps: int | None = None
-    rir: int | None = None
-    order_in_template: int | None = None
-    pause_seconds: int | None = None
-    weight_kg: float | None = None
