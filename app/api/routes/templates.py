@@ -74,9 +74,27 @@ def create_template(
     current_user: User = Depends(get_current_user),
     session: Session = Depends(get_session),
 ) -> WorkoutTemplate:
-    template = WorkoutTemplate.model_validate(payload)
+    exercises_payload = payload.exercises
+    template_data = payload.model_dump(exclude={"exercises"})
+    template = WorkoutTemplate.model_validate(template_data)
     template.user_id = current_user.id
-    return save_and_refresh(session, template)
+    template = save_and_refresh(session, template)
+
+    if exercises_payload:
+        for exercise_payload in exercises_payload:
+            ensure_accessible_exercise_or_400(
+                session=session,
+                exercise_id=exercise_payload.exercise_id,
+                user_id=current_user.id,
+            )
+            te = TemplateExercise.model_validate(exercise_payload)
+            te.template_id = template.id
+            te.updated_at = utcnow()
+            session.add(te)
+        session.commit()
+        session.refresh(template)
+
+    return template
 
 
 @router.patch("/{template_id}", response_model=WorkoutTemplateRead)
@@ -88,7 +106,26 @@ def update_template(
 ) -> WorkoutTemplate:
     template = _get_user_template_or_404(session, template_id, current_user)
     updates = payload.model_dump(exclude_unset=True)
+    exercises_payload = updates.pop("exercises", None)
+
     template.sqlmodel_update(updates)
+
+    if exercises_payload is not None:
+        # delete existing exercises
+        session.exec(delete(TemplateExercise).where(TemplateExercise.template_id == template_id))
+        # recreate
+        for exercise_payload in exercises_payload:
+            ensure_accessible_exercise_or_400(
+                session=session,
+                exercise_id=exercise_payload.exercise_id,
+                user_id=current_user.id,
+            )
+            te = TemplateExercise.model_validate(exercise_payload)
+            te.template_id = template.id
+            te.updated_at = utcnow()
+            session.add(te)
+        session.flush()
+
     return save_and_refresh(session, template)
 
 
@@ -257,6 +294,7 @@ def duplicate_template(
         split_id=original.split_id,
         order_in_split=original.order_in_split,
         user_id=current_user.id,
+        description=original.description,
     )
     session.add(new_template)
     session.commit()

@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 from datetime import datetime
 from typing import TYPE_CHECKING
 
@@ -71,6 +73,7 @@ class WorkoutTemplateBase(SQLModel):
     split_id: int | None = Field(default=None, foreign_key="training_splits.id", index=True)
     name: str
     order_in_split: int | None = None
+    description: str | None = None
 
     @field_validator("name")
     @classmethod
@@ -113,7 +116,7 @@ class TemplateExercise(TemplateExerciseBase, table=True):
 
 
 class WorkoutTemplateCreate(WorkoutTemplateBase):
-    pass
+    exercises: list[TemplateExerciseCreate] = Field(default_factory=list)
 
 
 class WorkoutTemplateRead(WorkoutTemplateBase):
@@ -124,6 +127,8 @@ class WorkoutTemplateUpdate(SQLModel):
     split_id: int | None = None
     name: str | None = None
     order_in_split: int | None = None
+    description: str | None = None
+    exercises: list[TemplateExerciseCreate] | None = None
 
     @field_validator("name")
     @classmethod

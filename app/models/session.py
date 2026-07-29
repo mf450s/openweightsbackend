@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 from datetime import datetime
 from typing import TYPE_CHECKING, List, Optional
 
@@ -76,6 +78,7 @@ class SessionSet(SQLModel, table=True):
 
 class WorkoutSessionCreate(WorkoutSessionBase):
     user_id: int | None = None
+    sets: list[SessionSetCreate] = Field(default_factory=list)
 
 
 class WorkoutSessionRead(WorkoutSessionBase):
@@ -89,6 +92,7 @@ class WorkoutSessionUpdate(SQLModel):
     started_at: datetime | None = None
     ended_at: datetime | None = None
     active_session: bool | None = None
+    sets: list[SessionSetCreate] | None = None
 
     @field_validator("notes")
     @classmethod

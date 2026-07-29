@@ -32,8 +32,8 @@ _LOGIN_MAX_ATTEMPTS = 5
 _LOGIN_WINDOW_SECONDS = 15 * 60
 
 
-@router.post("/register", response_model=UserRead, status_code=status.HTTP_201_CREATED)
-def register_user(payload: UserCreate, session: Session = Depends(get_session)) -> User:
+@router.post("/register", response_model=AuthToken, status_code=status.HTTP_201_CREATED)
+def register_user(payload: UserCreate, session: Session = Depends(get_session)) -> AuthToken:
     existing = session.exec(select(User.id).where(User.email == payload.email)).first()
     if existing is not None:
         raise HTTPException(
@@ -46,7 +46,29 @@ def register_user(payload: UserCreate, session: Session = Depends(get_session)) 
         name=payload.name,
         password_hash=hash_password(payload.password),
     )
-    return save_and_refresh(session, user)
+    user = save_and_refresh(session, user)
+    if user.id is None:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="User ID is missing.",
+        )
+
+    settings = get_settings()
+    refresh_plain, refresh_hashed = generate_refresh_token()
+    refresh_token = RefreshToken(
+        user_id=user.id,
+        token_hash=refresh_hashed,
+        family_id=secrets.token_hex(16),
+        expires_at=datetime.now(timezone.utc) + timedelta(days=settings.refresh_token_expire_days),
+    )
+    session.add(refresh_token)
+    session.commit()
+
+    return AuthToken(
+        access_token=create_access_token(user.id),
+        refresh_token=refresh_plain,
+        user=UserRead.model_validate(user),
+    )
 
 
 @router.post("/login", response_model=AuthToken)

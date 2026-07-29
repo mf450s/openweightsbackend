@@ -170,9 +170,38 @@ def create_session(
     session: Session = Depends(get_session),
 ) -> WorkoutSession:
     _validate_template_for_session(session, payload.template_id)
-    workout_session = WorkoutSession.model_validate(payload)
+    sets_payload = payload.sets
+    session_create_data = payload.model_dump(exclude={"sets"})
+    workout_session = WorkoutSession.model_validate(session_create_data)
     workout_session.user_id = current_user.id
-    return save_and_refresh(session, workout_session)
+    workout_session = save_and_refresh(session, workout_session)
+
+    if sets_payload:
+        for set_payload in sets_payload:
+            template_exercise = _resolve_template_exercise_for_session_set(
+                session,
+                set_payload.template_exercise_id,
+                workout_session,
+            )
+            if set_payload.exercise_id is None and template_exercise is None:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="exercise_id or template_exercise_id is required.",
+                )
+            exercise_id = set_payload.exercise_id
+            if exercise_id is None and template_exercise is not None:
+                exercise_id = template_exercise.exercise_id
+            _validate_exercise_for_session_set(session, exercise_id, current_user.id)
+
+            session_set = SessionSet.model_validate(set_payload)
+            session_set.session_id = workout_session.id
+            if session_set.exercise_id is None and exercise_id is not None:
+                session_set.exercise_id = exercise_id
+            session.add(session_set)
+        session.commit()
+        session.refresh(workout_session)
+
+    return workout_session
 
 
 @router.patch("/{session_id}", response_model=WorkoutSessionRead)
@@ -184,9 +213,44 @@ def update_session(
 ) -> WorkoutSession:
     workout_session = _get_session_or_404(session, session_id, current_user)
     updates = payload.model_dump(exclude_unset=True)
+    sets_payload = updates.pop("sets", None)
+
     if "template_id" in updates:
         _validate_template_for_session(session, updates["template_id"])
     workout_session.sqlmodel_update(updates)
+
+    if sets_payload is not None:
+        # delete existing sets
+        existing_sets = session.exec(
+            select(SessionSet).where(SessionSet.session_id == session_id)
+        ).all()
+        for s in existing_sets:
+            session.delete(s)
+
+        # recreate from payload
+        for set_payload in sets_payload:
+            template_exercise = _resolve_template_exercise_for_session_set(
+                session,
+                set_payload.template_exercise_id,
+                workout_session,
+            )
+            if set_payload.exercise_id is None and template_exercise is None:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="exercise_id or template_exercise_id is required.",
+                )
+            exercise_id = set_payload.exercise_id
+            if exercise_id is None and template_exercise is not None:
+                exercise_id = template_exercise.exercise_id
+            _validate_exercise_for_session_set(session, exercise_id, current_user.id)
+
+            session_set = SessionSet.model_validate(set_payload)
+            session_set.session_id = session_id
+            if session_set.exercise_id is None and exercise_id is not None:
+                session_set.exercise_id = exercise_id
+            session.add(session_set)
+        session.flush()
+
     return save_and_refresh(session, workout_session)
 
 
