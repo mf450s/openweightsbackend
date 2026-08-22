@@ -172,3 +172,43 @@ def test_password_change_requires_correct_current_password(client):
     )
     assert response.status_code == 400
     assert response.json()["detail"] == "Current password is incorrect."
+
+
+def test_account_deletion_removes_owned_aggregate_and_anonymizes_exercises(client, session):
+    from sqlmodel import select
+
+    from app.models.exercise import Exercise
+    from app.models.template import TemplateExercise, WorkoutTemplate
+    from app.models.user import RefreshToken, User, UserSettings
+
+    assert register_user(client).status_code == 201
+    token = login_user(client).json()["access_token"]
+    headers = {"Authorization": f"Bearer {token}"}
+    exercise = client.post(
+        "/api/v1/exercises/", json={"name": "Public Squat", "is_public": True}, headers=headers
+    )
+    assert exercise.status_code == 201
+    exercise_id = exercise.json()["id"]
+    template = client.post("/api/v1/templates/", json={"name": "Leg Day"}, headers=headers)
+    assert template.status_code == 201
+    template_id = template.json()["id"]
+    link = client.post(
+        f"/api/v1/templates/{template_id}/exercises",
+        json={"exercise_id": exercise_id, "sets": 3, "reps": 8},
+        headers=headers,
+    )
+    assert link.status_code == 201
+    assert client.get("/api/v1/users/me/settings", headers=headers).status_code == 200
+
+    response = client.request(
+        "DELETE", "/api/v1/users/me", json={"password": "supersecret"}, headers=headers
+    )
+    assert response.status_code == 204
+    assert session.exec(select(User).where(User.email == "max@example.com")).first() is None
+    assert session.exec(select(UserSettings)).all() == []
+    assert session.exec(select(RefreshToken)).all() == []
+    assert session.exec(select(WorkoutTemplate).where(WorkoutTemplate.id == template_id)).first() is None
+    assert session.exec(select(TemplateExercise).where(TemplateExercise.template_id == template_id)).all() == []
+    retained = session.get(Exercise, exercise_id)
+    assert retained is not None
+    assert retained.created_by_user_id is None

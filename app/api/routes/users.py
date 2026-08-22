@@ -17,7 +17,7 @@ from app.models.user import (
     UserUpdate,
 )
 from app.services.persistence import no_content_response, save_and_refresh
-from app.services.user_service import delete_user_related_data
+from app.services.user_service import delete_user_aggregate
 
 router = APIRouter()
 
@@ -130,6 +130,6 @@ def delete_current_user(
             detail="Password is incorrect.",
         )
 
-    delete_user_related_data(session, current_user)
+    delete_user_aggregate(session, current_user)
     session.commit()
     return no_content_response()
