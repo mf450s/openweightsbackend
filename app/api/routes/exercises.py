@@ -21,12 +21,11 @@ from app.models.exercise import (
     MuscleGroupUpdate,
     MuscleRegion,
     MuscleRegionCreate,
+    MuscleRegionInfo,
     MuscleRegionRead,
     MuscleRegionUpdate,
-    MuscleRegionInfo,
 )
 from app.models.progression import (
-    Estimated1RmPoint,
     ExerciseSessionHistory,
     ExerciseSetRead,
     OneRmHistoryPoint,
@@ -35,6 +34,18 @@ from app.models.session import SessionSet, WorkoutSession
 from app.models.template import TemplateExercise
 from app.models.user import User
 from app.services.exercise_access import can_access_exercise, get_accessible_exercise_or_403
+from app.services.exercise_taxonomy import (
+    create_group,
+    create_region,
+    delete_group,
+    delete_region,
+    exercise_read,
+    list_groups,
+    list_regions,
+    muscle_region_info,
+    update_group,
+    update_region,
+)
 from app.services.persistence import no_content_response, save_and_refresh
 from app.services.progression_service import get_best_1rm_for_session
 
@@ -66,6 +77,7 @@ def _can_modify_exercise(exercise: Exercise, user: User) -> bool:
 
 
 def _get_muscle_region_info(session: Session, exercise_id: int) -> list[MuscleRegionInfo]:
+    return muscle_region_info(session, exercise_id)
     rows = session.exec(
         select(MuscleRegion.id, MuscleRegion.name, ExerciseMuscleRegion.target_type)
         .join(ExerciseMuscleRegion, ExerciseMuscleRegion.muscle_region_id == MuscleRegion.id)
@@ -78,6 +90,7 @@ def _get_muscle_region_info(session: Session, exercise_id: int) -> list[MuscleRe
 def _exercise_to_read(
     exercise: Exercise, muscles: list[MuscleRegionInfo] | None = None
 ) -> ExerciseRead:
+    return exercise_read(exercise, muscles)
     muscles = muscles or []
     return ExerciseRead(
         id=exercise.id,
@@ -97,6 +110,7 @@ def list_muscle_groups(
     offset: int = Query(default=0, ge=0),
     session: Session = Depends(get_session),
 ) -> PaginatedResponse[MuscleGroupRead]:
+    return list_groups(session, limit, offset)
     def _query():
         base = select(MuscleGroup)
         total = session.exec(select(func.count()).select_from(base.subquery())).one()
@@ -118,6 +132,7 @@ def create_muscle_group(
     _: User = Depends(get_current_user),
     session: Session = Depends(get_session),
 ) -> MuscleGroup:
+    return create_group(session, payload)
     existing = session.exec(select(MuscleGroup.id).where(MuscleGroup.name == payload.name)).first()
     if existing:
         raise HTTPException(
@@ -138,6 +153,7 @@ def update_muscle_group(
     _: User = Depends(get_current_user),
     session: Session = Depends(get_session),
 ) -> MuscleGroup:
+    return update_group(session, group_id, payload)
     group = session.get(MuscleGroup, group_id)
     if group is None:
         raise HTTPException(
@@ -168,6 +184,7 @@ def delete_muscle_group(
     _: User = Depends(get_current_user),
     session: Session = Depends(get_session),
 ) -> Response:
+    return delete_group(session, group_id)
     group = session.get(MuscleGroup, group_id)
     if group is None:
         raise HTTPException(
@@ -200,6 +217,7 @@ def list_muscle_regions(
     offset: int = Query(default=0, ge=0),
     session: Session = Depends(get_session),
 ) -> PaginatedResponse[MuscleRegionRead]:
+    return list_regions(session, group_id, limit, offset)
     def _query():
         base = select(MuscleRegion)
         if group_id is not None:
@@ -224,6 +242,7 @@ def create_muscle_region(
     _: User = Depends(get_current_user),
     session: Session = Depends(get_session),
 ) -> MuscleRegion:
+    return create_region(session, payload)
     if payload.group_id is not None and session.get(MuscleGroup, payload.group_id) is None:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -257,6 +276,7 @@ def update_muscle_region(
     _: User = Depends(get_current_user),
     session: Session = Depends(get_session),
 ) -> MuscleRegion:
+    return update_region(session, region_id, payload)
     region = session.get(MuscleRegion, region_id)
     if region is None:
         raise HTTPException(
@@ -298,6 +318,7 @@ def delete_muscle_region(
     _: User = Depends(get_current_user),
     session: Session = Depends(get_session),
 ) -> Response:
+    return delete_region(session, region_id)
     region = session.get(MuscleRegion, region_id)
     if region is None:
         raise HTTPException(
