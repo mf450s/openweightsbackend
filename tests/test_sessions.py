@@ -438,7 +438,13 @@ def test_bulk_create_session_sets(client):
             "sets": [
                 {"exercise_id": exercise_id, "set_number": 1, "weight_kg": 80.0, "reps": 8},
                 {"exercise_id": exercise_id, "set_number": 2, "weight_kg": 80.0, "reps": 7},
-                {"exercise_id": exercise_id, "set_number": 3, "weight_kg": 75.0, "reps": 9, "rir": 1},
+                {
+                    "exercise_id": exercise_id,
+                    "set_number": 3,
+                    "weight_kg": 75.0,
+                    "reps": 9,
+                    "rir": 1,
+                },
             ]
         },
         headers=headers,
@@ -610,3 +616,52 @@ def test_bulk_delete_session_sets_404(client):
         headers=headers,
     )
     assert delete_resp.status_code == 404
+
+
+def test_session_set_orchestration_pr_and_ownership_paths(client):
+    assert register_user(client, email="owner@example.com", name="Owner").status_code == 201
+    assert register_user(client, email="other@example.com", name="Other").status_code == 201
+    owner_headers = auth_headers(client, email="owner@example.com")
+    other_headers = auth_headers(client, email="other@example.com")
+
+    exercise = create_exercise(client, owner_headers, name="Private Press", is_public=False)
+    assert exercise.status_code == 201
+    exercise_id = exercise.json()["id"]
+
+    session_response = client.post(
+        "/api/v1/sessions/",
+        json={"performed_at": "2026-01-01T09:00:00Z"},
+        headers=owner_headers,
+    )
+    assert session_response.status_code == 201
+    session_id = session_response.json()["id"]
+
+    created = client.post(
+        f"/api/v1/sessions/{session_id}/sets",
+        json={"exercise_id": exercise_id, "set_number": 1, "weight_kg": 80, "reps": 5},
+        headers=owner_headers,
+    )
+    assert created.status_code == 201
+    assert created.json()["personal_record"]["pr_type"] == "max_weight"
+
+    updated = client.patch(
+        f"/api/v1/sessions/{session_id}/sets/{created.json()['id']}",
+        json={"weight_kg": 90},
+        headers=owner_headers,
+    )
+    assert updated.status_code == 200
+    assert updated.json()["personal_record"]["value"] == 90.0
+
+    denied_single = client.post(
+        f"/api/v1/sessions/{session_id}/sets",
+        json={"exercise_id": exercise_id, "set_number": 2, "weight_kg": 70, "reps": 5},
+        headers=other_headers,
+    )
+    assert denied_single.status_code == 404
+
+    denied_bulk = client.post(
+        f"/api/v1/sessions/{session_id}/sets/bulk",
+        json={"sets": [{"exercise_id": exercise_id, "set_number": 2, "reps": 5}]},
+        headers=other_headers,
+    )
+    assert denied_bulk.status_code == 404
