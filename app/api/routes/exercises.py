@@ -23,6 +23,7 @@ from app.models.exercise import (
     MuscleRegionCreate,
     MuscleRegionRead,
     MuscleRegionUpdate,
+    MuscleRegionInfo,
 )
 from app.models.progression import (
     ExerciseSessionHistory,
