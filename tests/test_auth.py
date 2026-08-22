@@ -171,3 +171,26 @@ def test_login_rate_limiting_block_and_reset(client):
     # 6th → 429
     resp = login_user(client, email="reset_test@example.com", password="last_try")
     assert resp.status_code == 429
+
+
+def test_refresh_rotation_keeps_family_and_never_stores_plaintext(client, session):
+    from sqlmodel import select
+
+    from app.core.security import hash_refresh_token
+    from app.models.user import RefreshToken
+
+    assert register_user(client).status_code == 201
+    old_token = login_user(client).json()["refresh_token"]
+    original = session.exec(
+        select(RefreshToken).where(RefreshToken.token_hash == hash_refresh_token(old_token))
+    ).first()
+    assert original is not None
+    assert original.token_hash == hash_refresh_token(old_token)
+    assert original.token_hash != old_token
+
+    rotated = client.post("/api/v1/auth/refresh", json={"refresh_token": old_token})
+    assert rotated.status_code == 200
+    tokens = session.exec(select(RefreshToken)).all()
+    family_tokens = [token for token in tokens if token.family_id == original.family_id]
+    assert len(family_tokens) == 2
+    assert {token.revoked for token in family_tokens} == {True, False}

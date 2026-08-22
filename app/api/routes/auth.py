@@ -22,6 +22,8 @@ from app.models.user import (
     UserCreate,
     UserRead,
 )
+from app.services.auth_service import issue_tokens, rotate_refresh_token
+from app.services.auth_service import logout as revoke_token
 from app.services.persistence import save_and_refresh
 
 router = APIRouter()
@@ -52,6 +54,8 @@ def register_user(payload: UserCreate, session: Session = Depends(get_session)) 
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="User ID is missing.",
         )
+
+    return issue_tokens(session, user)
 
     settings = get_settings()
     refresh_plain, refresh_hashed = generate_refresh_token()
@@ -122,6 +126,7 @@ def login_user(
 
     # Successful login resets the counter
     _login_attempts.pop(client_ip, None)
+    return issue_tokens(session, user)
 
     return AuthToken(
         access_token=create_access_token(user.id),
@@ -132,6 +137,7 @@ def login_user(
 
 @router.post("/refresh", response_model=AuthToken)
 def refresh_token(payload: RefreshRequest, session: Session = Depends(get_session)) -> AuthToken:
+    return rotate_refresh_token(session, payload.refresh_token)
     token_hash = hash_refresh_token(payload.refresh_token)
 
     stored = session.exec(select(RefreshToken).where(RefreshToken.token_hash == token_hash)).first()
@@ -187,6 +193,8 @@ def refresh_token(payload: RefreshRequest, session: Session = Depends(get_sessio
 
 @router.post("/logout", status_code=status.HTTP_204_NO_CONTENT)
 def logout_user(payload: RefreshRequest, session: Session = Depends(get_session)) -> Response:
+    revoke_token(session, payload.refresh_token)
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
     token_hash = hash_refresh_token(payload.refresh_token)
     stored = session.exec(select(RefreshToken).where(RefreshToken.token_hash == token_hash)).first()
 
