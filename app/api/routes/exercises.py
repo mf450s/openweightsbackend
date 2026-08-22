@@ -21,7 +21,6 @@ from app.models.exercise import (
     MuscleGroupUpdate,
     MuscleRegion,
     MuscleRegionCreate,
-    MuscleRegionInfo,
     MuscleRegionRead,
     MuscleRegionUpdate,
 )
