@@ -23,16 +23,11 @@ from app.models.template import WorkoutTemplate
 from app.models.user import User
 from app.services.persistence import no_content_response, save_and_refresh
 from app.services.session_service import delete_workout_session_with_sets
-from app.services.workout_set_orchestration import (
+
+from app.services.workout_set_orchestration import (  # isort: skip
     add_session_sets,
-)
-from app.services.workout_set_orchestration import (
     bulk_create_session_sets as orchestrate_bulk_create_session_sets,
-)
-from app.services.workout_set_orchestration import (
     create_session_set as orchestrate_create_session_set,
-)
-from app.services.workout_set_orchestration import (
     update_session_set as orchestrate_update_session_set,
 )
 
