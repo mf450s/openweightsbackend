@@ -1,5 +1,3 @@
-from datetime import date, datetime, timedelta, timezone
-
 from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 from pydantic import BaseModel
 from sqlalchemy import func
@@ -21,12 +19,22 @@ from app.models.session import (
     WorkoutSessionRead,
     WorkoutSessionUpdate,
 )
-from app.models.template import TemplateExercise, WorkoutTemplate
+from app.models.template import WorkoutTemplate
 from app.models.user import User
-from app.services.exercise_access import ensure_accessible_exercise_or_400
 from app.services.persistence import no_content_response, save_and_refresh
-from app.services.progression_service import check_and_create_pr
 from app.services.session_service import delete_workout_session_with_sets
+from app.services.workout_set_orchestration import (
+    add_session_sets,
+)
+from app.services.workout_set_orchestration import (
+    bulk_create_session_sets as orchestrate_bulk_create_session_sets,
+)
+from app.services.workout_set_orchestration import (
+    create_session_set as orchestrate_create_session_set,
+)
+from app.services.workout_set_orchestration import (
+    update_session_set as orchestrate_update_session_set,
+)
 
 router = APIRouter()
 
@@ -55,40 +63,6 @@ def _validate_template_for_session(session: Session, template_id: int | None) ->
         )
 
 
-def _validate_exercise_for_session_set(
-    session: Session,
-    exercise_id: int | None,
-    user_id: int,
-) -> None:
-    if exercise_id is None:
-        return
-    ensure_accessible_exercise_or_400(session=session, exercise_id=exercise_id, user_id=user_id)
-
-
-def _resolve_template_exercise_for_session_set(
-    session: Session,
-    template_exercise_id: int | None,
-    workout_session: WorkoutSession,
-) -> TemplateExercise | None:
-    if template_exercise_id is None:
-        return None
-    template_exercise = session.get(TemplateExercise, template_exercise_id)
-    if template_exercise is None:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Selected template exercise does not exist.",
-        )
-    if (
-        workout_session.template_id is not None
-        and template_exercise.template_id != workout_session.template_id
-    ):
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Selected template exercise does not belong to this session template.",
-        )
-    return template_exercise
-
-
 @router.get("/", response_model=PaginatedResponse)
 def list_sessions(
     current_user: User = Depends(get_current_user),
@@ -101,7 +75,8 @@ def list_sessions(
     items = list(
         session.exec(
             base.order_by(WorkoutSession.performed_at.desc(), WorkoutSession.id.desc())
-            .offset(offset).limit(limit)
+            .offset(offset)
+            .limit(limit)
         ).all()
     )
     return PaginatedResponse[WorkoutSessionRead](
@@ -177,27 +152,7 @@ def create_session(
     workout_session = save_and_refresh(session, workout_session)
 
     if sets_payload:
-        for set_payload in sets_payload:
-            template_exercise = _resolve_template_exercise_for_session_set(
-                session,
-                set_payload.template_exercise_id,
-                workout_session,
-            )
-            if set_payload.exercise_id is None and template_exercise is None:
-                raise HTTPException(
-                    status_code=status.HTTP_400_BAD_REQUEST,
-                    detail="exercise_id or template_exercise_id is required.",
-                )
-            exercise_id = set_payload.exercise_id
-            if exercise_id is None and template_exercise is not None:
-                exercise_id = template_exercise.exercise_id
-            _validate_exercise_for_session_set(session, exercise_id, current_user.id)
-
-            session_set = SessionSet.model_validate(set_payload)
-            session_set.session_id = workout_session.id
-            if session_set.exercise_id is None and exercise_id is not None:
-                session_set.exercise_id = exercise_id
-            session.add(session_set)
+        add_session_sets(session, workout_session, current_user.id, sets_payload)
         session.commit()
         session.refresh(workout_session)
 
@@ -228,27 +183,7 @@ def update_session(
             session.delete(s)
 
         # recreate from payload
-        for set_payload in sets_payload:
-            template_exercise = _resolve_template_exercise_for_session_set(
-                session,
-                set_payload.template_exercise_id,
-                workout_session,
-            )
-            if set_payload.exercise_id is None and template_exercise is None:
-                raise HTTPException(
-                    status_code=status.HTTP_400_BAD_REQUEST,
-                    detail="exercise_id or template_exercise_id is required.",
-                )
-            exercise_id = set_payload.exercise_id
-            if exercise_id is None and template_exercise is not None:
-                exercise_id = template_exercise.exercise_id
-            _validate_exercise_for_session_set(session, exercise_id, current_user.id)
-
-            session_set = SessionSet.model_validate(set_payload)
-            session_set.session_id = session_id
-            if session_set.exercise_id is None and exercise_id is not None:
-                session_set.exercise_id = exercise_id
-            session.add(session_set)
+        add_session_sets(session, workout_session, current_user.id, sets_payload)
         session.flush()
 
     return save_and_refresh(session, workout_session)
@@ -279,13 +214,10 @@ def list_session_sets(
     total = session.exec(select(func.count()).select_from(base.subquery())).one()
     items = list(
         session.exec(
-            base.order_by(SessionSet.set_number, SessionSet.id)
-            .offset(offset).limit(limit)
+            base.order_by(SessionSet.set_number, SessionSet.id).offset(offset).limit(limit)
         ).all()
     )
-    return PaginatedResponse[SessionSetRead](
-        items=items, total=total, limit=limit, offset=offset
-    )
+    return PaginatedResponse[SessionSetRead](items=items, total=total, limit=limit, offset=offset)
 
 
 @router.post(
@@ -298,36 +230,7 @@ def create_session_set(
     session: Session = Depends(get_session),
 ) -> dict:
     workout_session = _get_session_or_404(session, session_id, current_user)
-    template_exercise = _resolve_template_exercise_for_session_set(
-        session,
-        payload.template_exercise_id,
-        workout_session,
-    )
-    if payload.exercise_id is None and template_exercise is None:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="exercise_id or template_exercise_id is required.",
-        )
-    exercise_id = payload.exercise_id
-    if exercise_id is None and template_exercise is not None:
-        exercise_id = template_exercise.exercise_id
-    _validate_exercise_for_session_set(session, exercise_id, current_user.id)
-
-    session_set = SessionSet.model_validate(payload)
-    session_set.session_id = session_id
-    if session_set.exercise_id is None and exercise_id is not None:
-        session_set.exercise_id = exercise_id
-    session_set = save_and_refresh(session, session_set)
-
-    set_data = SessionSetRead.model_validate(session_set).model_dump()
-    if exercise_id is not None:
-        pr = check_and_create_pr(
-            session, current_user.id, exercise_id, session_set, workout_session.performed_at
-        )
-        if pr is not None:
-            set_data["personal_record"] = {"pr_type": pr.pr_type, "value": float(pr.value)}
-
-    return set_data
+    return orchestrate_create_session_set(session, workout_session, current_user.id, payload)
 
 
 @router.patch("/{session_id}/sets/{set_id}", response_model=SessionSetRead)
@@ -340,42 +243,9 @@ def update_session_set(
 ) -> dict:
     workout_session = _get_session_or_404(session, session_id, current_user)
     session_set = _get_session_set_or_404(session, session_id, set_id)
-    previous_exercise_id = session_set.exercise_id
-    updates = payload.model_dump(exclude_unset=True)
-    template_exercise_id = updates.get("template_exercise_id", session_set.template_exercise_id)
-    template_exercise = _resolve_template_exercise_for_session_set(
-        session,
-        template_exercise_id,
-        workout_session,
+    return orchestrate_update_session_set(
+        session, workout_session, session_set, current_user.id, payload
     )
-    exercise_id = updates.get("exercise_id", session_set.exercise_id)
-    if exercise_id is None and template_exercise is not None:
-        exercise_id = template_exercise.exercise_id
-        updates["exercise_id"] = exercise_id
-    if exercise_id is None and template_exercise is None:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="exercise_id or template_exercise_id is required.",
-        )
-    _validate_exercise_for_session_set(session, exercise_id, current_user.id)
-
-    session_set.sqlmodel_update(updates)
-    session_set = save_and_refresh(session, session_set)
-
-    set_data = SessionSetRead.model_validate(session_set).model_dump()
-    resolved_exercise_id = exercise_id or previous_exercise_id
-    if resolved_exercise_id is not None:
-        pr = check_and_create_pr(
-            session,
-            current_user.id,
-            resolved_exercise_id,
-            session_set,
-            workout_session.performed_at,
-        )
-        if pr is not None:
-            set_data["personal_record"] = {"pr_type": pr.pr_type, "value": float(pr.value)}
-
-    return set_data
 
 
 @router.delete("/{session_id}/sets/{set_id}", status_code=status.HTTP_204_NO_CONTENT)
@@ -438,9 +308,7 @@ def end_session(
     set_ids = [s.id for s in all_sets]
     prs = []
     if set_ids:
-        pr_statement = select(PersonalRecord).where(
-            PersonalRecord.session_set_id.in_(set_ids)
-        )
+        pr_statement = select(PersonalRecord).where(PersonalRecord.session_set_id.in_(set_ids))
         prs = list(session.exec(pr_statement).all())
     session_data["personal_records"] = [
         {"pr_type": pr.pr_type, "value": float(pr.value)} for pr in prs
@@ -458,49 +326,9 @@ def bulk_create_session_sets(
 ) -> list[dict]:
     """Create multiple session sets in a single transaction with PR detection."""
     workout_session = _get_session_or_404(session, session_id, current_user)
-
-    prepared: list[tuple[SessionSet, int]] = []
-    for set_payload in payload.sets:
-        template_exercise = _resolve_template_exercise_for_session_set(
-            session,
-            set_payload.template_exercise_id,
-            workout_session,
-        )
-        if set_payload.exercise_id is None and template_exercise is None:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="exercise_id or template_exercise_id is required for each set.",
-            )
-        exercise_id = set_payload.exercise_id
-        if exercise_id is None and template_exercise is not None:
-            exercise_id = template_exercise.exercise_id
-        _validate_exercise_for_session_set(session, exercise_id, current_user.id)
-
-        session_set = SessionSet.model_validate(set_payload)
-        session_set.session_id = session_id
-        if session_set.exercise_id is None and exercise_id is not None:
-            session_set.exercise_id = exercise_id
-        session.add(session_set)
-        prepared.append((session_set, exercise_id))
-
-    session.commit()
-
-    results = []
-    for session_set, exercise_id in prepared:
-        session.refresh(session_set)
-        set_data = SessionSetRead.model_validate(session_set).model_dump()
-        pr = check_and_create_pr(
-            session,
-            current_user.id,
-            exercise_id,
-            session_set,
-            workout_session.performed_at,
-        )
-        if pr is not None:
-            set_data["personal_record"] = {"pr_type": pr.pr_type, "value": float(pr.value)}
-        results.append(set_data)
-
-    return results
+    return orchestrate_bulk_create_session_sets(
+        session, workout_session, current_user.id, payload.sets
+    )
 
 
 @router.post("/{session_id}/sets/bulk/delete", status_code=status.HTTP_204_NO_CONTENT)
