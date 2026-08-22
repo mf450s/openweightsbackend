@@ -210,6 +210,28 @@ def test_muscle_group_and_region_conflict_and_validation(client):
     assert duplicate_region.status_code == 409
 
 
+def test_taxonomy_cache_is_invalidated_by_group_updates_and_deletes(client):
+    assert register_user(client, email="owner@example.com", name="Owner").status_code == 201
+    headers = auth_headers(client, email="owner@example.com")
+    created = client.post(
+        "/api/v1/exercises/muscle-groups/", json={"name": "Shoulders"}, headers=headers
+    )
+    assert created.status_code == 201
+    group_id = created.json()["id"]
+
+    assert client.get("/api/v1/exercises/muscle-groups/").json()["items"][0]["name"] == "Shoulders"
+    updated = client.patch(
+        f"/api/v1/exercises/muscle-groups/{group_id}",
+        json={"name": "Delts"},
+        headers=headers,
+    )
+    assert updated.status_code == 200
+    assert client.get("/api/v1/exercises/muscle-groups/").json()["items"][0]["name"] == "Delts"
+
+    assert client.delete(f"/api/v1/exercises/muscle-groups/{group_id}", headers=headers).status_code == 204
+    assert client.get("/api/v1/exercises/muscle-groups/").json()["items"] == []
+
+
 def test_exercise_create_update_conflicts_and_invalid_references(client):
     assert register_user(client, email="owner@example.com", name="Owner").status_code == 201
     headers = auth_headers(client, email="owner@example.com")
