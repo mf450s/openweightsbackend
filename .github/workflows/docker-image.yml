@@ -97,6 +97,7 @@ jobs:
       - name: upload trivy image results
         if: always() && hashFiles('trivy-image.sarif') != '' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)
         uses: github/codeql-action/upload-sarif@192325c86100d080feab897ff886c34abd4c83a3 # v3.30.3
+        continue-on-error: true
         with:
           sarif_file: trivy-image.sarif
           category: trivy-image
@@ -104,6 +105,7 @@ jobs:
       - name: upload trivy config results
         if: always() && hashFiles('trivy-config.sarif') != '' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)
         uses: github/codeql-action/upload-sarif@192325c86100d080feab897ff886c34abd4c83a3 # v3.30.3
+        continue-on-error: true
         with:
           sarif_file: trivy-config.sarif
           category: trivy-config
@@ -111,6 +113,7 @@ jobs:
       - name: upload trivy secret results
         if: always() && hashFiles('trivy-secret.sarif') != '' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)
         uses: github/codeql-action/upload-sarif@192325c86100d080feab897ff886c34abd4c83a3 # v3.30.3
+        continue-on-error: true
         with:
           sarif_file: trivy-secret.sarif
           category: trivy-secret
@@ -118,6 +121,7 @@ jobs:
       - name: upload grype results
         if: always() && hashFiles('grype.sarif') != '' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)
         uses: github/codeql-action/upload-sarif@192325c86100d080feab897ff886c34abd4c83a3 # v3.30.3
+        continue-on-error: true
         with:
           sarif_file: grype.sarif
           category: grype-image
