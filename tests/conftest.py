@@ -10,7 +10,7 @@ os.environ["DATABASE_URL"] = "sqlite://"
 
 from app.api.routes.auth import _login_attempts  # noqa: E402
 from app.db.session import get_session  # noqa: E402
-from app.main import app  # noqa: E402
+from app.main import api_rate_limiter, app  # noqa: E402
 
 engine = create_engine(
     "sqlite://",
@@ -30,6 +30,7 @@ def session_fixture() -> Generator[Session, None, None]:
 @pytest.fixture(autouse=True)
 def reset_login_attempts() -> Generator[None, None, None]:
     _login_attempts.clear()
+    api_rate_limiter.clear()
     yield
 
 
