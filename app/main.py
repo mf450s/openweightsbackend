@@ -8,6 +8,7 @@ from starlette.middleware.base import BaseHTTPMiddleware
 from app.api.router import api_router
 from app.core.config import get_settings
 from app.db.init_db import init_db
+from app.middleware.rate_limit import InMemoryRateLimiter, IPRateLimitMiddleware
 
 settings = get_settings()
 
@@ -28,6 +29,23 @@ async def lifespan(_: FastAPI):
 
 
 app = FastAPI(title=settings.app_name, lifespan=lifespan)
+api_rate_limiter = InMemoryRateLimiter(
+    max_requests=settings.api_rate_limit_requests,
+    window_seconds=settings.api_rate_limit_window_seconds,
+)
+trusted_proxy_ips = {
+    value.strip()
+    for value in settings.api_rate_limit_trusted_proxies.split(",")
+    if value.strip()
+}
+app.add_middleware(
+    IPRateLimitMiddleware,
+    limiter=api_rate_limiter,
+    api_prefix=settings.api_v1_prefix,
+    enabled=settings.api_rate_limit_enabled,
+    trusted_proxy_ips=trusted_proxy_ips,
+    proxy_header=settings.api_rate_limit_proxy_header,
+)
 app.add_middleware(GZipMiddleware, minimum_size=1000)
 app.add_middleware(
     CORSMiddleware,
