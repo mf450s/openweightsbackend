@@ -5,60 +5,183 @@ on:
     branches: ['**']
   pull_request:
     branches: [development]
+  schedule:
+    - cron: "23 3 * * 1"
   workflow_dispatch:
 
+permissions:
+  contents: read
+
+env:
+  image: local/openweightsbackend:${{ github.sha }}
+
 jobs:
-  docker:
-    runs-on: ubuntu-latest
+  build-scan:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
     permissions:
       contents: read
-      packages: write
+      security-events: write
 
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+      - name: checkout
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v4
+      - name: setup buildx
+        uses: docker/setup-buildx-action@37fe631027851001ddb9b187196cc803df7f5f0e # v4
 
-      - name: Log in to GitHub Container Registry
-        uses: docker/login-action@v4
-        with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-        if: github.event_name != 'pull_request'
-
-      - name: Extract Docker metadata
-        id: meta
-        uses: docker/metadata-action@v6
-        with:
-          images: ghcr.io/${{ github.repository }}
-          tags: |
-            type=raw,value=latest,enable=${{ github.ref_name == 'main' }}
-            type=raw,value=nightly,enable=${{ github.ref_name == 'development' }}
-            type=ref,event=branch,enable=${{ github.ref_name != 'main' && github.ref_name != 'development' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch') }}
-            type=raw,value=pr-check,enable=${{ github.event_name == 'pull_request' }}
-
-      - name: Set up Docker layer cache
-        uses: actions/cache@v4
+      - name: set up docker layer cache
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
         with:
           path: /tmp/.buildx-cache
           key: ${{ runner.os }}-buildx-${{ github.sha }}
           restore-keys: |
             ${{ runner.os }}-buildx-
 
-      - name: Build and push
-        uses: docker/build-push-action@v7
+      - name: build image
+        uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7
         with:
           context: .
-          push: ${{ github.event_name != 'pull_request' }}
-          tags: ${{ steps.meta.outputs.tags }}
-          labels: ${{ steps.meta.outputs.labels }}
+          load: true
+          tags: ${{ env.image }}
           cache-from: type=local,src=/tmp/.buildx-cache
           cache-to: type=local,dest=/tmp/.buildx-cache-new,mode=max
 
-      - name: Move cache
+      - name: move cache
         run: |
           rm -rf /tmp/.buildx-cache
           mv /tmp/.buildx-cache-new /tmp/.buildx-cache
+
+      - name: trivy image scan
+        uses: aquasecurity/trivy-action@57a97c7e7821a5776cebc9bb87c984fa69cba8f1 # 0.35.0
+        with:
+          image-ref: ${{ env.image }}
+          format: sarif
+          output: trivy-image.sarif
+          severity: HIGH,CRITICAL
+          ignore-unfixed: true
+          vuln-type: os,library
+          exit-code: "0"
+
+      - name: trivy config scan
+        uses: aquasecurity/trivy-action@57a97c7e7821a5776cebc9bb87c984fa69cba8f1 # 0.35.0
+        with:
+          scan-type: config
+          scan-ref: .
+          format: sarif
+          output: trivy-config.sarif
+          severity: HIGH,CRITICAL
+          exit-code: "0"
+
+      - name: trivy secret scan
+        uses: aquasecurity/trivy-action@57a97c7e7821a5776cebc9bb87c984fa69cba8f1 # 0.35.0
+        with:
+          scan-type: fs
+          scan-ref: .
+          scanners: secret
+          format: sarif
+          output: trivy-secret.sarif
+          exit-code: "0"
+
+      - name: grype image scan
+        uses: anchore/scan-action@1638637db639e0ade3258b51db49a9a137574c3e # v6
+        with:
+          image: ${{ env.image }}
+          output-format: sarif
+          output-file: grype.sarif
+          only-fixed: true
+          fail-build: false
+          severity-cutoff: high
+          cache-db: true
+
+      - name: upload trivy image results
+        if: always() && hashFiles('trivy-image.sarif') != '' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)
+        uses: github/codeql-action/upload-sarif@192325c86100d080feab897ff886c34abd4c83a3 # v3.30.3
+        continue-on-error: true
+        with:
+          sarif_file: trivy-image.sarif
+          category: trivy-image
+
+      - name: upload trivy config results
+        if: always() && hashFiles('trivy-config.sarif') != '' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)
+        uses: github/codeql-action/upload-sarif@192325c86100d080feab897ff886c34abd4c83a3 # v3.30.3
+        continue-on-error: true
+        with:
+          sarif_file: trivy-config.sarif
+          category: trivy-config
+
+      - name: upload trivy secret results
+        if: always() && hashFiles('trivy-secret.sarif') != '' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)
+        uses: github/codeql-action/upload-sarif@192325c86100d080feab897ff886c34abd4c83a3 # v3.30.3
+        continue-on-error: true
+        with:
+          sarif_file: trivy-secret.sarif
+          category: trivy-secret
+
+      - name: upload grype results
+        if: always() && hashFiles('grype.sarif') != '' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)
+        uses: github/codeql-action/upload-sarif@192325c86100d080feab897ff886c34abd4c83a3 # v3.30.3
+        continue-on-error: true
+        with:
+          sarif_file: grype.sarif
+          category: grype-image
+
+      - name: save image artifact
+        if: github.event_name == 'push'
+        run: docker save --output /tmp/openweightsbackend-image.tar "${image}"
+
+      - name: upload image artifact
+        if: github.event_name == 'push'
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: openweightsbackend-image-${{ github.sha }}
+          path: /tmp/openweightsbackend-image.tar
+          if-no-files-found: error
+          retention-days: 1
+
+  publish:
+    if: github.event_name == 'push'
+    needs: build-scan
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      packages: write
+
+    steps:
+      - name: download image artifact
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: openweightsbackend-image-${{ github.sha }}
+          path: /tmp
+
+      - name: load image artifact
+        run: docker load --input /tmp/openweightsbackend-image.tar
+
+      - name: login to ghcr
+        uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: extract docker metadata
+        id: meta
+        uses: docker/metadata-action@dc802804100637a589fabce1cb79ff13a1411302 # v6
+        with:
+          images: ghcr.io/${{ github.repository }}
+          tags: |
+            type=raw,value=latest,enable=${{ github.ref_name == 'main' }}
+            type=raw,value=nightly,enable=${{ github.ref_name == 'development' }}
+            type=ref,event=branch,enable=${{ github.ref_name != 'main' && github.ref_name != 'development' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch') }}
+
+      - name: publish image tags
+        env:
+          local_image: ${{ env.image }}
+          tags: ${{ steps.meta.outputs.tags }}
+        run: |
+          set -euo pipefail
+          while IFS= read -r tag; do
+            [ -n "$tag" ] || continue
+            docker tag "$local_image" "$tag"
+            docker push "$tag"
+          done <<< "$tags"
