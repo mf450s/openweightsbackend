@@ -210,6 +210,108 @@ def test_muscle_group_and_region_conflict_and_validation(client):
     assert duplicate_region.status_code == 409
 
 
+def test_delete_muscle_region_success(client):
+    assert register_user(client, email="owner@example.com", name="Owner").status_code == 201
+    headers = auth_headers(client, email="owner@example.com")
+
+    group = client.post(
+        "/api/v1/exercises/muscle-groups/",
+        json={"name": "Chest"},
+        headers=headers,
+    )
+    assert group.status_code == 201
+    group_id = group.json()["id"]
+
+    region = client.post(
+        "/api/v1/exercises/muscle-regions/",
+        json={"name": "Upper Chest", "group_id": group_id},
+        headers=headers,
+    )
+    assert region.status_code == 201
+    region_id = region.json()["id"]
+
+    delete_response = client.delete(
+        f"/api/v1/exercises/muscle-regions/{region_id}", headers=headers
+    )
+    assert delete_response.status_code == 204, delete_response.text
+
+    listing = client.get("/api/v1/exercises/muscle-regions/", headers=headers)
+    assert listing.status_code == 200
+    assert all(item["id"] != region_id for item in listing.json()["items"])
+
+    delete_again = client.delete(
+        f"/api/v1/exercises/muscle-regions/{region_id}", headers=headers
+    )
+    assert delete_again.status_code == 404
+
+
+def test_delete_muscle_region_blocked_when_referenced_by_exercise(client):
+    assert register_user(client, email="owner@example.com", name="Owner").status_code == 201
+    headers = auth_headers(client, email="owner@example.com")
+
+    region = client.post(
+        "/api/v1/exercises/muscle-regions/",
+        json={"name": "Lats", "group_id": None},
+        headers=headers,
+    )
+    assert region.status_code == 201
+    region_id = region.json()["id"]
+
+    exercise = create_exercise(
+        client, headers, name="Pull Up", muscle_region_ids=[region_id]
+    )
+    assert exercise.status_code == 201
+
+    delete_response = client.delete(
+        f"/api/v1/exercises/muscle-regions/{region_id}", headers=headers
+    )
+    assert delete_response.status_code == 409
+
+    listing = client.get("/api/v1/exercises/muscle-regions/", headers=headers)
+    assert listing.status_code == 200
+    assert any(item["id"] == region_id for item in listing.json()["items"])
+
+
+def test_delete_muscle_group_success_and_region_reference_conflict(client):
+    assert register_user(client, email="owner@example.com", name="Owner").status_code == 201
+    headers = auth_headers(client, email="owner@example.com")
+
+    group = client.post(
+        "/api/v1/exercises/muscle-groups/",
+        json={"name": "Legs"},
+        headers=headers,
+    )
+    assert group.status_code == 201
+    group_id = group.json()["id"]
+
+    region = client.post(
+        "/api/v1/exercises/muscle-regions/",
+        json={"name": "Quads", "group_id": group_id},
+        headers=headers,
+    )
+    assert region.status_code == 201
+
+    blocked = client.delete(f"/api/v1/exercises/muscle-groups/{group_id}", headers=headers)
+    assert blocked.status_code == 409
+
+    region_id = region.json()["id"]
+    delete_region = client.delete(
+        f"/api/v1/exercises/muscle-regions/{region_id}", headers=headers
+    )
+    assert delete_region.status_code == 204, delete_region.text
+
+    delete_group = client.delete(f"/api/v1/exercises/muscle-groups/{group_id}", headers=headers)
+    assert delete_group.status_code == 204, delete_group.text
+
+    listing = client.get("/api/v1/exercises/muscle-groups/", headers=headers)
+    assert all(item["id"] != group_id for item in listing.json()["items"])
+
+
+def test_delete_muscle_region_requires_auth(client):
+    response = client.delete("/api/v1/exercises/muscle-regions/1")
+    assert response.status_code in (401, 403)
+
+
 def test_exercise_create_update_conflicts_and_invalid_references(client):
     assert register_user(client, email="owner@example.com", name="Owner").status_code == 201
     headers = auth_headers(client, email="owner@example.com")
