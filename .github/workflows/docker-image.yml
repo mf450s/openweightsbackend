@@ -31,7 +31,7 @@ jobs:
           username: ${{ github.repository_owner == 'mf450s' && github.actor || secrets.GHCR_USERNAME }}
           password: ${{ github.repository_owner == 'mf450s' && secrets.GITHUB_TOKEN || secrets.GHCR_TOKEN }}
         # Forgejo mirrors the github context; repository_owner distinguishes the GitHub canonical.
-        if: github.event_name != 'pull_request' && github.repository_owner == 'mf450s'
+        if: ${{ github.event_name != 'pull_request' && github.repository_owner == 'mf450s' }}
 
       - name: Extract Docker metadata
         id: meta
