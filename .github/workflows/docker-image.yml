@@ -10,6 +10,9 @@ on:
 jobs:
   docker:
     runs-on: ubuntu-latest
+    env:
+      REGISTRY: ghcr.io
+      IMAGE_NAME: mf450s/openweightsbackend
     permissions:
       contents: read
       packages: write
@@ -24,29 +27,21 @@ jobs:
       - name: Log in to GitHub Container Registry
         uses: docker/login-action@v4
         with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.server_url == 'https://github.com' && github.actor || secrets.GHCR_USERNAME }}
+          password: ${{ github.server_url == 'https://github.com' && secrets.GITHUB_TOKEN || secrets.GHCR_TOKEN }}
         if: github.event_name != 'pull_request'
 
       - name: Extract Docker metadata
         id: meta
         uses: docker/metadata-action@v6
         with:
-          images: ghcr.io/${{ github.repository }}
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
           tags: |
             type=raw,value=latest,enable=${{ github.ref_name == 'main' }}
             type=raw,value=nightly,enable=${{ github.ref_name == 'development' }}
             type=ref,event=branch,enable=${{ github.ref_name != 'main' && github.ref_name != 'development' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch') }}
             type=raw,value=pr-check,enable=${{ github.event_name == 'pull_request' }}
-
-      - name: Set up Docker layer cache
-        uses: actions/cache@v4
-        with:
-          path: /tmp/.buildx-cache
-          key: ${{ runner.os }}-buildx-${{ github.sha }}
-          restore-keys: |
-            ${{ runner.os }}-buildx-
 
       - name: Build and push
         uses: docker/build-push-action@v7
